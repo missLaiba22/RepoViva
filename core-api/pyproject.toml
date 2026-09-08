@@ -1,0 +1,40 @@
+[project]
+name = "core-api"
+version = "0.1.0"
+description = "RepoViva Core API: auth, users, repositories, interviews, reports metadata"
+requires-python = ">=3.11"
+dependencies = [
+    # Web framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+
+    # Data validation & settings
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+
+    # Database
+    "sqlalchemy>=2.0.36",
+    "psycopg[binary]>=3.2.0",
+    "alembic>=1.14.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.7.0",
+    "httpx>=0.27.0",              # for FastAPI's TestClient
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/core_api"]

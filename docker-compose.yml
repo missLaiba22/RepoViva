@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: repoviva-postgres
+    environment:
+      POSTGRES_USER: repoviva
+      POSTGRES_PASSWORD: repoviva_dev
+      POSTGRES_DB: repoviva
+    ports:
+      - "5432:5432"
+    volumes:
+      - repoviva_pg_data:/var/lib/postgresql/data
+
+volumes:
+  repoviva_pg_data:

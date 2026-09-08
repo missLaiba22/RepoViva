@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Env
+.env
+
+# uv
+# (uv.lock IS committed; don't ignore it)
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
