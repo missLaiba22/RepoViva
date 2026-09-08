@@ -13,8 +13,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Core
     database_url: str
-    env: str = "development"
+    env: str
+
+    # GitHub OAuth
+    github_client_id: str
+    github_client_secret: str
+    github_oauth_redirect_uri: str
+
+    # Secrets
+    cookie_secret: str
+    token_encryption_key: str
 
 
 @lru_cache

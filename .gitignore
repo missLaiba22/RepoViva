@@ -1,15 +1,23 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
 .venv/
+venv/
+.pytest_cache/
+.ruff_cache/
 
-# Env
+# Environment
 .env
-
-# uv
-# (uv.lock IS committed; don't ignore it)
+.env.local
 
 # IDE
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
+
+# OS
+*.swp
+# Personal
+core-api/journal.md
