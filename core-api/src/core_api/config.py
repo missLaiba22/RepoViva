@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     cookie_secret: str
     token_encryption_key: str
 
+    # Where Repository Service lives — used to fire the ingest trigger.
+    repository_service_base_url: str
+
+    # Shared HMAC secret for signing internal service-to-service calls.
+    # Must match repository-service's INTERNAL_HMAC_SECRET.
+    internal_hmac_secret: str
+
 
 @lru_cache
 def get_settings() -> Settings:

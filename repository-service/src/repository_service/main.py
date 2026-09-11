@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 
+from repository_service.internal.router import router as internal_router
+
 app = FastAPI(
     title="RepoViva Repository Service",
     description="Owns repository ingestion and retrieval.",
     version="0.1.0",
 )
+
+app.include_router(internal_router)
 
 
 @app.get("/health")

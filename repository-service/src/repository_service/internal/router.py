@@ -1,116 +1,68 @@
-"""HMAC-SHA256 signing and verification for internal service-to-service calls.
+"""Internal API endpoints — called only by other RepoViva services.
 
-Wire format (decision 027):
-    signature = HMAC_SHA256(secret, f"{timestamp}.{body}")
-    headers:
-        X-Repoviva-Timestamp: <unix seconds>
-        X-Repoviva-Signature: sha256=<hex digest>
-
-Receivers reject requests older than MAX_AGE_SECONDS.
+All requests here must carry a valid HMAC signature (decision 027).
+The signature is verified before the route handler runs; a failure
+short-circuits the request with 401.
 """
 
-from __future__ import annotations
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 
-import hashlib
-import hmac
-import time
-from dataclasses import dataclass
+from repository_service.config import get_settings
+from repository_service.internal.hmac_auth import (
+    SIGNATURE_HEADER,
+    TIMESTAMP_HEADER,
+    HmacVerificationError,
+    verify,
+)
 
-# Freshness window — decision 027. Requests older than this are rejected
-# to prevent replay of captured signatures.
-MAX_AGE_SECONDS = 60
-
-TIMESTAMP_HEADER = "X-Repoviva-Timestamp"
-SIGNATURE_HEADER = "X-Repoviva-Signature"
-SIGNATURE_PREFIX = "sha256="
+router = APIRouter(prefix="/internal/v1", tags=["internal"])
 
 
-@dataclass(frozen=True)
-class SignedHeaders:
-    """The two headers a sender must attach to a signed request."""
-
-    timestamp: str
-    signature: str
-
-    def as_dict(self) -> dict[str, str]:
-        return {
-            TIMESTAMP_HEADER: self.timestamp,
-            SIGNATURE_HEADER: self.signature,
-        }
+class IngestTriggerBody(BaseModel):
+    github_url: str
 
 
-class HmacVerificationError(Exception):
-    """Raised when a request fails HMAC verification.
+async def verify_hmac(request: Request) -> None:
+    """FastAPI dependency: verify the HMAC signature on an inbound request.
 
-    A single exception type on purpose — the caller shouldn't need to
-    distinguish 'bad signature' from 'stale timestamp'. Both mean
-    'reject this request with 401'.
+    Reads the raw body bytes (not the parsed JSON) — the signature covers
+    exactly what was sent on the wire, not what Pydantic parses out of it.
+    Raises HTTPException(401) on any verification failure.
+
+    Note: `await request.body()` caches the bytes, so the route handler
+    can still parse the body into its Pydantic model afterwards.
     """
-
-
-def sign(*, body: bytes, secret: str, timestamp: int | None = None) -> SignedHeaders:
-    """Compute HMAC headers for an outbound request.
-
-    Args:
-        body: The exact request body bytes that will be sent on the wire.
-              Must be bytes, not a dict or string — signing has to happen
-              over the same bytes the receiver will see.
-        secret: The shared HMAC secret.
-        timestamp: Unix seconds. Defaults to now; overridable for testing.
-
-    Returns:
-        SignedHeaders — attach both headers to the outbound request.
-    """
-    ts = str(timestamp if timestamp is not None else int(time.time()))
-    payload = f"{ts}.".encode() + body
-    digest = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    return SignedHeaders(timestamp=ts, signature=f"{SIGNATURE_PREFIX}{digest}")
-
-
-def verify(
-    *,
-    body: bytes,
-    timestamp_header: str | None,
-    signature_header: str | None,
-    secret: str,
-    now: int | None = None,
-) -> None:
-    """Verify an inbound request's HMAC.
-
-    Raises HmacVerificationError on any failure. Returns None on success.
-
-    Args:
-        body: The exact request body bytes as received on the wire.
-              The caller must pass raw bytes, not parsed JSON — subtle
-              re-serialization differences would break the signature.
-        timestamp_header: Value of the X-Repoviva-Timestamp header, if present.
-        signature_header: Value of the X-Repoviva-Signature header, if present.
-        secret: The shared HMAC secret.
-        now: Current unix seconds. Defaults to now; overridable for testing.
-    """
-    if timestamp_header is None or signature_header is None:
-        raise HmacVerificationError("missing signature headers")
-
-    # Parse timestamp.
+    body = await request.body()
+    settings = get_settings()
     try:
-        ts = int(timestamp_header)
-    except ValueError as exc:
-        raise HmacVerificationError("invalid timestamp") from exc
+        verify(
+            body=body,
+            timestamp_header=request.headers.get(TIMESTAMP_HEADER),
+            signature_header=request.headers.get(SIGNATURE_HEADER),
+            secret=settings.internal_hmac_secret,
+        )
+    except HmacVerificationError as exc:
+        # Log the specific reason server-side; return a generic 401 to the caller.
+        # (Not leaking the reason back to the caller is deliberate — see hmac_auth.py.)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="unauthorized",
+        ) from exc
 
-    # Freshness check — reject stale requests (replay protection).
-    current = now if now is not None else int(time.time())
-    if abs(current - ts) > MAX_AGE_SECONDS:
-        raise HmacVerificationError("timestamp outside freshness window")
 
-    # Parse signature — must start with the algorithm tag.
-    if not signature_header.startswith(SIGNATURE_PREFIX):
-        raise HmacVerificationError("unsupported signature algorithm")
-    received_digest = signature_header[len(SIGNATURE_PREFIX):]
+@router.post(
+    "/repositories/{repository_id}/ingest",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_hmac)],
+)
+def ingest_trigger(repository_id: int, body: IngestTriggerBody) -> dict[str, str]:
+    """Accept an ingest trigger from Core API.
 
-    # Recompute expected signature over the exact same bytes the sender signed.
-    payload = f"{ts}.".encode() + body
-    expected_digest = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-
-    # Constant-time comparison — never use == here (timing attack).
-    if not hmac.compare_digest(received_digest, expected_digest):
-        raise HmacVerificationError("signature mismatch")
+    Currently does nothing with the request — real ingestion is deferred
+    (see decision 028). The 202 response acknowledges receipt; when real
+    ingestion is implemented, the actual work will run asynchronously and
+    this endpoint will still return 202 immediately.
+    """
+    # TODO(slice-3): kick off real ingestion for `repository_id` from `body.github_url`.
+    return {"status": "accepted", "repository_id": str(repository_id)}
