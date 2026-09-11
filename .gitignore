@@ -21,3 +21,5 @@ Thumbs.db
 *.swp
 # Personal
 core-api/journal.md
+# One-off diagnostic scripts — never committed
+_*.py
