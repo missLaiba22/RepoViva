@@ -8,6 +8,7 @@ from alembic import context
 from core_api.config import get_settings
 from core_api.db import Base
 from core_api.users.models import User  # noqa: F401
+from core_api.repositories.models import Repository  # noqa: F401
 
 
 # this is the Alembic Config object, which provides

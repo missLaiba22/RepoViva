@@ -404,3 +404,9 @@ No server-side revocation. Once issued, a session cookie is valid until it expir
 
 **Revisit when:**
 The product needs admin-controlled session revocation, or the session payload needs to grow beyond a user ID (at which point a JWT with claims might be cleaner).
+----------------------------------------------------------------------------------------------------------------------------
+
+Repository Service reports progress to Core API using event-style callbacks, not state snapshots. Chosen over snapshot-style because the ingestion pipeline is expected to produce more than just state transitions — sub-stage progress (fetching, parsing, chunking, embedding, indexing), file counts, warnings — and event-style scales to that naturally. Snapshot-style would need to be extended or replaced once the pipeline gains real stages.
+
+Tradeoff: Core API must know the state machine (which events are legal from which state) and must dedupe on event_id because HTTP callbacks can be retried and duplicated. Slightly more schema surface than snapshot-style would require today.
+

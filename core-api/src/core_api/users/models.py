@@ -13,9 +13,7 @@ class User(Base):
 
     # GitHub's numeric user ID — stable, unique, never changes.
     # BigInteger because GitHub IDs are 64-bit.
-    github_user_id: Mapped[int] = mapped_column(
-        BigInteger, unique=True, index=True, nullable=False
-    )
+    github_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
 
     # GitHub login (username). Can change on GitHub's side — don't use as identity.
     github_login: Mapped[str] = mapped_column(String(255), nullable=False)
