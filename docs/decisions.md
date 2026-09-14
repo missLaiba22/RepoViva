@@ -491,3 +491,69 @@ Real ingestion is implemented in Repository Service. At that point:
 1. Assess actual event volume, number of consumers, and replay requirements.
 2. Choose between HTTP callbacks (decisions 024–026 as-is) or a message broker (which would supersede decisions 024–026).
 3. Implement whichever is justified.
+
+## 029 — HTTP callbacks with loose state machine; no dedup for MVP
+
+**Decision:**
+Revisits decision 028, now that real ingestion exists in Repository Service.
+
+Ingestion status is reported from Repository Service to Core API via
+HMAC-signed HTTP callbacks (`POST /internal/v1/repositories/{id}/events`),
+implementing the design in decisions 024–026. Repository Service emits
+`ingestion.started` before fetch, `ingestion.completed` on success, and
+`ingestion.failed` on any exception — with the git stderr (or unexpected
+exception message) carried in `data.error_message`.
+
+Core API applies a **loose state machine** on receipt: any target
+transition is accepted from `queued` or `in_progress`; terminal states
+(`ready`, `failed`) reject further events with 422. This defends
+against out-of-order and dropped events without demanding strict
+event ordering.
+
+**Deduplication by `event_id` is deferred.** Repository Service does
+not retry failed callbacks; Core API does not persist processed
+`event_id`s. `emit_event` logs and swallows network/HTTP errors —
+a lost callback leaves the row in whatever state it was last set to,
+and the frontend surfaces `queued` or `in_progress` opaquely until the
+next callback (or until the ingestion is retried).
+
+**Why:**
+For MVP (single consumer, ~3 callbacks per ingestion, services on the
+same Docker network), the realistic drop rate is essentially zero, and
+building retry+dedup infrastructure ahead of any observed failure
+would be exactly the speculative machinery the project's guidance
+warns against. The `event_id` field is already in the wire format, so
+adding dedup later is a table migration plus a 20-line receiver
+change — the sender doesn't need to change.
+
+The loose state machine was chosen over strict ordering because HTTP
+does not guarantee event delivery order under load, and being tolerant
+of out-of-order events (e.g. `ingestion.completed` arriving before
+`ingestion.started` if the first callback is retried) keeps the
+state visible to the frontend even when the network misbehaves.
+
+**Tradeoff:**
+- A callback dropped by network failure leaves the DB row stale until
+  the next event lands. Users may see `in_progress` for a completed
+  ingestion, or `queued` for one in progress.
+- The loose state machine accepts events that a strict machine would
+  reject; a bug in Repository Service that sent `ingestion.completed`
+  before `ingestion.started` would be silently accepted. Chosen
+  anyway because real-world event-order drift from HTTP is more
+  likely than a bug of that specific shape.
+- Terminal states are unchangeable via callback. Retry semantics
+  (whether a `failed` row can be resurrected) are still deferred as
+  in decision 026 — a retry endpoint that resets the row to `queued`
+  would live on Core API, not go through the event pipeline.
+
+**Revisit when:**
+- Observed callback drop rate exceeds ~1% of ingestions, or a
+  single dropped callback in production causes user confusion — at
+  that point add sender-side retry with exponential backoff, and
+  receiver-side dedup by `event_id` (via a `processed_events` table
+  as sketched in the shared-DB storage note in `architecture.md`).
+- Callback event volume grows past a few per ingestion (per-stage
+  progress like `fetch.complete`, `chunk.complete`, `embed.complete`)
+  and observability of individual event delivery becomes valuable.
+- A message broker becomes justified by a second consumer of the
+  same events (e.g. an audit-log service or an analytics pipeline).
