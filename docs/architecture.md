@@ -160,7 +160,9 @@ body: { github_url: string }
 → 401 Unauthorized (missing or invalid HMAC signature)
 ```
 
-**Designed but deferred (see decision 028):**
+**Implemented (slice 3):**
+
+Repository Service → Core API (status callback)
 
 Repository Service → Core API (status callback)
 ```
@@ -181,6 +183,25 @@ Response codes (planned):
 ```
 
 **Planned for later slices:**
+POST /internal/v1/repositories/{repository_id}/events
+Headers: X-Repoviva-Timestamp, X-Repoviva-Signature (HMAC-SHA256)
+body: {
+event_id: <uuid v4>,
+event_type: "ingestion.started" | "ingestion.completed" | "ingestion.failed",
+occurred_at: <ISO 8601 timestamp, UTC>,
+data: { error_message?: string, ... }
+}
+
+Response codes:
+
+202 Accepted — event received and state transition applied
+401 Unauthorized — missing or invalid HMAC signature
+404 Not Found — unknown repository_id
+422 Unprocessable Entity — illegal state transition (target row is
+in a terminal state: ready or failed)
+
+
+Deduplication by event_id is not implemented for MVP — see decision 029.
 
 Voice Service → Repository Service (retrieval)
 ```
@@ -216,18 +237,46 @@ Server → Client
 
 ## Data Flow
 
-### Repository ingestion (current state — slice 2 step 4)
+### Repository ingestion (current state — slice 3 step 1)
 
-Ingestion is triggered synchronously and runs asynchronously inside Repository Service. Status reporting back to Core API is not implemented — see decision 028.
+Ingestion is triggered synchronously and runs asynchronously inside
+Repository Service. Status is reported back to Core API via HMAC-signed
+HTTP callbacks (decisions 024–026, 029).
 
 1. User submits a GitHub URL via `POST /v1/repositories` (Core API).
-2. Core API validates the URL, creates a Repository row with status `queued`, and calls Repository Service's `POST /internal/v1/repositories/{id}/ingest` (HMAC-signed) with the GitHub URL in the body.
-3. Repository Service verifies the HMAC signature and returns `202 Accepted` immediately. (Real ingestion work is not yet implemented — Repository Service currently acknowledges and does nothing further.)
-4. If the trigger call fails (network error, timeout, non-2xx response), Core API marks the just-created row `failed` immediately with an `error_message` describing the failure, and returns 201 with that row. The user sees the row as `failed` right away.
-5. Core API returns the created (or immediately-failed) Repository row to the client with a 201 response.
-6. Client polls `GET /v1/repositories/{id}` to observe the current status. In the current architecture, once the row is `queued` it stays there until decision 028 is revisited — the frontend has no visibility into real ingestion progress.
+2. Core API validates the URL, creates a Repository row with status
+   `queued`, and calls Repository Service's
+   `POST /internal/v1/repositories/{id}/ingest` (HMAC-signed) with the
+   GitHub URL in the body.
+3. Repository Service verifies the HMAC signature and returns
+   `202 Accepted` immediately. It schedules `run_ingestion` on
+   FastAPI's `BackgroundTasks` and returns; the pipeline runs after
+   the response is sent.
+4. If the trigger call fails at step 2 (network error, timeout, non-2xx
+   response), Core API marks the just-created row `failed` immediately
+   with an `error_message` describing the failure, and returns 201 with
+   that row. The user sees the row as `failed` right away.
+5. Core API returns the created (or immediately-failed) Repository row
+   to the client with a 201 response.
+6. Repository Service's background pipeline runs: emit
+   `ingestion.started` → shallow-clone the repo into
+   `workspace/<repository_id>/` → emit `ingestion.completed` (or
+   `ingestion.failed` with the fetch error). Each callback is an
+   HMAC-signed `POST /internal/v1/repositories/{id}/events` on
+   Core API.
+7. Core API applies the loose state machine on each event (decision 029):
+   `queued`/`in_progress` transitions to `in_progress`/`ready`/`failed`
+   as dictated by the event; terminal states reject further events
+   with 422.
+8. Client polls `GET /v1/repositories/{id}` to observe the current
+   status. States progress `queued → in_progress → ready` for
+   successful ingestions, or `queued → in_progress → failed`
+   (with `error_message` populated) for failed ones.
 
-The event-callback protocol described in decisions 024–026 is a designed-but-unimplemented option. When ingestion status visibility is needed, that design (or a message-broker alternative) will be implemented.
+Parse/chunk/embed stages are not yet implemented — the pipeline
+currently completes after the git clone. When those stages land,
+they will slot in between the clone and the `ingestion.completed`
+event.
 
 ### Interview session (live, over WebSocket)
 
@@ -242,11 +291,15 @@ The event-callback protocol described in decisions 024–026 is a designed-but-u
 ## Data Storage
 
 - **PostgreSQL (shared, with pgvector)** — one database, per-service schemas:
-  - Core API schema: users, repositories (metadata + status), interviews, encrypted OAuth tokens, reports (metadata). *When decision 028 is revisited and callbacks are implemented, a table for processed inbound event IDs will be added.*
+   - Core API schema: users, repositories (metadata + status),
+    interviews, encrypted OAuth tokens, reports (metadata).
+    *A table for processed inbound event IDs may be added later
+    if decision 029 is revisited and dedup becomes necessary.*
   - Repository Service schema: code chunks, embeddings, repository index state.
   - Voice Service schema: turns.
   - Evaluation Service schema: report content.
 - **No raw audio storage** — audio is discarded after transcription.
+ 
 
 ## Current Constraints
 

@@ -2,9 +2,24 @@
 
 RepoViva's Repository Service. Owns repository ingestion (fetching, parsing, chunking, embedding) and retrieval. This is the second of the four microservices — see `docs/architecture.md` for the full picture.
 
+
+
 ## Current status
 
-**Slice 2 (in progress).** The service currently accepts an ingest trigger from Core API and runs a stubbed background job that simulates progress by firing status-callback events back to Core API. Real repository fetching, parsing, chunking, and embedding are not implemented yet — they land in a later slice.
+**Slice 3, step 1 complete.** The service:
+
+- Accepts an HMAC-signed ingest trigger from Core API.
+- Shallow-clones the repository into an ephemeral workspace
+  (`workspace/<repository_id>/`, see decision on workspace layout).
+- Reports status back to Core API as HMAC-signed HTTP callbacks
+  (`ingestion.started`, `ingestion.completed`, `ingestion.failed`) —
+  see decisions 024–026 and 029.
+- Surfaces real git errors as `error_message` on the failed row so
+  the frontend can display them.
+
+The parse → chunk → embed → index stages are not yet implemented.
+The pipeline currently ends immediately after the clone succeeds
+(or emits `ingestion.failed` on any exception during the clone).
 
 ## Running locally
 
@@ -41,5 +56,9 @@ uv run pytest
 | `INTERNAL_HMAC_SECRET`  | Shared secret for HMAC signing on internal calls (see decision 027). Must match `core-api/.env`. |
 
 ## What's next
+## What's next
 
-See `docs/architecture.md` and `docs/decisions.md` for the shape of real ingestion. The next slice replaces the stubbed background job with real repository fetching from GitHub, code parsing, and pgvector-backed embedding storage.
+Real parse/chunk/embed via CocoIndex, storing chunks + embeddings
+in pgvector — see `docs/architecture.md`. That work slots into
+`ingestion/orchestrator.py` between the fetch-complete log line
+and the `ingestion.completed` callback.
