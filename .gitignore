@@ -23,3 +23,8 @@ Thumbs.db
 core-api/journal.md
 # One-off diagnostic scripts — never committed
 _*.py
+
+# Where cloned repositories live on disk. Directory is created on demand.
+WORKSPACE_ROOT=./workspace
+# Ephemeral scratch space for cloned repositories.
+workspace/

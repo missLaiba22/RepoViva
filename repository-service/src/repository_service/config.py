@@ -1,3 +1,4 @@
+# repository-service/src/repository_service/config.py
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,13 +15,14 @@ class Settings(BaseSettings):
     )
 
     env: str
-
-    # Where Core API is reachable — used to POST status callbacks.
     core_api_base_url: str
-
-    # Shared secret for HMAC signing on internal service-to-service calls.
-    # Must match core-api's INTERNAL_HMAC_SECRET.
     internal_hmac_secret: str
+
+    # Where cloned repositories live on disk during and after ingestion.
+    # One subdirectory per repository, keyed by repository_id.
+    # Persists across service restarts — the clone is scratch space for
+    # the ingestion pipeline, but keeping it around makes re-ingestion cheap.
+    workspace_root: Path
 
 
 @lru_cache
