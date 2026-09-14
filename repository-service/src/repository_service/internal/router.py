@@ -1,3 +1,4 @@
+# repository-service/src/repository_service/internal/router.py
 """Internal API endpoints — called only by other RepoViva services.
 
 All requests here must carry a valid HMAC signature (decision 027).
@@ -5,10 +6,18 @@ The signature is verified before the route handler runs; a failure
 short-circuits the request with 401.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    status,
+)
 from pydantic import BaseModel
 
-from repository_service.config import get_settings
+from repository_service.config import Settings, get_settings
+from repository_service.ingestion.orchestrator import run_ingestion
 from repository_service.internal.hmac_auth import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
@@ -43,8 +52,6 @@ async def verify_hmac(request: Request) -> None:
             secret=settings.internal_hmac_secret,
         )
     except HmacVerificationError as exc:
-        # Log the specific reason server-side; return a generic 401 to the caller.
-        # (Not leaking the reason back to the caller is deliberate — see hmac_auth.py.)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="unauthorized",
@@ -56,13 +63,21 @@ async def verify_hmac(request: Request) -> None:
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(verify_hmac)],
 )
-def ingest_trigger(repository_id: int, body: IngestTriggerBody) -> dict[str, str]:
-    """Accept an ingest trigger from Core API.
+async def ingest_trigger(
+    repository_id: int,
+    body: IngestTriggerBody,
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    """Accept an ingest trigger from Core API and schedule the pipeline.
 
-    Currently does nothing with the request — real ingestion is deferred
-    (see decision 028). The 202 response acknowledges receipt; when real
-    ingestion is implemented, the actual work will run asynchronously and
-    this endpoint will still return 202 immediately.
+    Returns 202 immediately; the pipeline runs asynchronously via
+    BackgroundTasks after the response is sent.
     """
-    # TODO(slice-3): kick off real ingestion for `repository_id` from `body.github_url`.
+    background_tasks.add_task(
+        run_ingestion,
+        repository_id=str(repository_id),
+        github_url=body.github_url,
+        workspace_root=settings.workspace_root,
+    )
     return {"status": "accepted", "repository_id": str(repository_id)}
