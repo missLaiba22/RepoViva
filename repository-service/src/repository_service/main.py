@@ -1,4 +1,10 @@
 from fastapi import FastAPI
+# repository-service/src/repository_service/main.py
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# ... rest of the file
 
 from repository_service.internal.router import router as internal_router
 
