@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from core_api.auth.router import router as auth_router
 from core_api.db import get_db
+from core_api.internal.router import router as internal_router
 from core_api.users.router import router as users_router
 from core_api.repositories.router import router as repositories_router
 
@@ -14,6 +15,7 @@ app = FastAPI(title="RepoViva Core API", version="0.1.0")
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(repositories_router)
+app.include_router(internal_router)
 
 
 @app.get("/health")

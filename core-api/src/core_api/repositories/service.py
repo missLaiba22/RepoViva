@@ -81,3 +81,73 @@ def list_repositories_for_user(
         .order_by(Repository.created_at.desc())
     )
     return list(db.scalars(stmt))
+
+# Add to core-api/src/core_api/repositories/service.py
+
+class IllegalTransitionError(Exception):
+    """Raised when an ingestion event would apply an illegal state transition.
+
+    Domain-level exception — the internal router turns this into a 422
+    response. Kept here (not in the router) so the service layer stays
+    the single source of truth for the state machine, per decision 026.
+    """
+
+
+# Loose state machine (slice 3, revisiting decision 028):
+# From non-terminal states any target is legal — this defends against
+# out-of-order and dropped events without being strict about ordering.
+# Terminal states reject everything, so a completed or failed ingestion
+# can't be retroactively re-transitioned.
+_LEGAL_SOURCE_STATES = frozenset(
+    {RepositoryStatus.QUEUED, RepositoryStatus.IN_PROGRESS}
+)
+
+_EVENT_TO_TARGET = {
+    "ingestion.started": RepositoryStatus.IN_PROGRESS,
+    "ingestion.completed": RepositoryStatus.READY,
+    "ingestion.failed": RepositoryStatus.FAILED,
+}
+
+
+def apply_ingestion_event(
+    db: Session,
+    *,
+    repository_id: int,
+    event_type: str,
+    error_message: str | None = None,
+) -> Repository | None:
+    """Apply an ingestion status event to a repository row.
+
+    Returns the updated Repository, or None if no repository with that
+    ID exists. Raises IllegalTransitionError if the current state is
+    terminal (`ready` or `failed`) and would otherwise be overwritten.
+
+    `error_message` is only used for `ingestion.failed`. On non-failure
+    transitions any stale `error_message` from a prior state is cleared
+    so the UI never shows a resolved error next to a ready row.
+    """
+    target = _EVENT_TO_TARGET[event_type]
+
+    # SELECT ... FOR UPDATE — we're about to check current state and
+    # conditionally write. Row lock avoids a race where two callbacks
+    # for the same repo interleave their read/write.
+    stmt = select(Repository).where(Repository.id == repository_id).with_for_update()
+    repo = db.scalars(stmt).one_or_none()
+    if repo is None:
+        return None
+
+    current = RepositoryStatus(repo.status)
+    if current not in _LEGAL_SOURCE_STATES:
+        raise IllegalTransitionError(
+            f"cannot apply {event_type} to repository in state {current.value}"
+        )
+
+    repo.status = target.value
+    if target is RepositoryStatus.FAILED:
+        repo.error_message = error_message or "ingestion failed"
+    else:
+        repo.error_message = None
+
+    db.commit()
+    db.refresh(repo)
+    return repo
