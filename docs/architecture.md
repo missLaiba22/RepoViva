@@ -260,10 +260,12 @@ HTTP callbacks (decisions 024–026, 029).
    to the client with a 201 response.
 6. Repository Service's background pipeline runs: emit
    `ingestion.started` → shallow-clone the repo into
-   `workspace/<repository_id>/` → emit `ingestion.completed` (or
-   `ingestion.failed` with the fetch error). Each callback is an
-   HMAC-signed `POST /internal/v1/repositories/{id}/events` on
-   Core API.
+   `workspace/<repository_id>/` → walk, chunk, and embed the source
+   tree via a per-repository CocoIndex App (decision 031), writing
+   rows to the shared `code_chunks` table → emit `ingestion.completed`
+   (or `ingestion.failed` with the fetch or indexing error). Each
+   callback is an HMAC-signed `POST /internal/v1/repositories/{id}/events`
+   on Core API.
 7. Core API applies the loose state machine on each event (decision 029):
    `queued`/`in_progress` transitions to `in_progress`/`ready`/`failed`
    as dictated by the event; terminal states reject further events
@@ -273,10 +275,11 @@ HTTP callbacks (decisions 024–026, 029).
    successful ingestions, or `queued → in_progress → failed`
    (with `error_message` populated) for failed ones.
 
-Parse/chunk/embed stages are not yet implemented — the pipeline
-currently completes after the git clone. When those stages land,
-they will slot in between the clone and the `ingestion.completed`
-event.
+Chunking uses CocoIndex's syntax-aware `RecursiveSplitter`; embedding
+is Voyage `voyage-4-lite` via CocoIndex's LiteLLM integration
+(decision 030). `code_chunks`' DDL is owned by Repository Service
+itself (`sql/schema.sql`, applied at startup), not by CocoIndex —
+see decision 031 for why that split exists and what it fixed.
 
 ### Interview session (live, over WebSocket)
 
@@ -295,7 +298,15 @@ event.
     interviews, encrypted OAuth tokens, reports (metadata).
     *A table for processed inbound event IDs may be added later
     if decision 029 is revisited and dedup becomes necessary.*
-  - Repository Service schema: code chunks, embeddings, repository index state.
+  - Repository Service schema: `code_chunks` (chunk text + Voyage
+    embeddings, one row per code chunk, primary key
+    `(repository_id, id)` — see decision 031). *Currently created in
+    the default `public` schema, not a dedicated per-service schema
+    — the per-service-schema split described here is not yet
+    implemented for Repository Service; see decision 031's "Revisit
+    when."* DDL lives in `repository-service/sql/schema.sql`,
+    applied idempotently by `db.apply_schema()` at service startup —
+    not by CocoIndex, which only writes rows to the table.
   - Voice Service schema: turns.
   - Evaluation Service schema: report content.
 - **No raw audio storage** — audio is discarded after transcription.
@@ -313,15 +324,15 @@ event.
 - Shared database across services with strict per-service table ownership (see decision 021).
 - No API gateway — frontend calls Core API and Voice Service directly (see decision 022).
 - Internal service-to-service HTTP calls are authenticated with HMAC-SHA256 over `timestamp + "." + body`, with a 60-second freshness window and a single shared secret (see decision 027). Each service implements its own HMAC module ("write it twice, deliberately") — the wire format is the contract.
-- Ingestion status is *not* observable end-to-end in the current implementation (see decision 028). A repository row only ever transitions to `failed` if the trigger call itself fails; real ingestion progress is invisible until callbacks or a message broker is implemented.
+- Ingestion status *is* observable end-to-end (decision 029, superseding decision 028): Repository Service emits HMAC-signed `ingestion.started`/`ingestion.completed`/`ingestion.failed` callbacks to Core API as the real pipeline runs, and Core API applies a loose state machine and exposes the current state via `GET /v1/repositories/{id}`. Callback delivery is not retried and events are not deduplicated — a callback dropped by network failure leaves the row in whatever state it was last set to, visible to the user as a stuck `queued`/`in_progress` until a later event (if any) corrects it. See decision 029's tradeoffs and revisit triggers.
 
 ## Future Evolution
 
 Open decisions that will shape architecture:
 
 - Choice of STT, TTS, and LLM providers
-- Choice of background job system inside Repository Service (real ingestion work — the trigger endpoint currently acknowledges without doing anything)
-- Ingestion status reporting mechanism (HTTP callbacks per decisions 024–026, or a message broker) — see decision 028
+- Choice of background job system inside Repository Service. Real ingestion (clone → chunk → embed via CocoIndex, decisions 030–031) currently runs on FastAPI `BackgroundTasks`; revisit if concurrency, retries, or observability needs outgrow that.
+- Whether to move off HTTP callbacks (decisions 024–026, 029) to a message broker — decision 029 names the revisit triggers (callback drop rate, event volume growth, a second event consumer)
 - Choice of managed Postgres provider (Supabase or Neon)
 - Full data model (fields per entity, per-service schemas)
 - Final WebSocket message protocol

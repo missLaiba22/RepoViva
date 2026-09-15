@@ -557,3 +557,205 @@ state visible to the frontend even when the network misbehaves.
   and observability of individual event delivery becomes valuable.
 - A message broker becomes justified by a second consumer of the
   same events (e.g. an audit-log service or an analytics pipeline).
+
+---
+
+## 030 — Voyage AI voyage-4-lite as the embedding provider
+
+**Decision:**
+Repository Service uses Voyage AI's `voyage-4-lite` as the embedding
+model for both indexing (Repository Service) and query-time embedding
+(Voice Service). Vector dimension is 1024. The API key
+(`VOYAGE_API_KEY`) is provided via environment variables and consumed
+through CocoIndex's LiteLLM integration
+(`cocoindex.ops.litellm.LiteLLMEmbedder("voyage/voyage-4-lite")`).
+
+*Correction (2026-09-16, slice 3 step 2 implementation): the API
+originally named here — `cocoindex.functions.EmbedText` /
+`cocoindex.LlmApiType.VOYAGE` — does not exist in the installed
+CocoIndex version (1.0.23). It was written against a
+different/expected API surface before real implementation. The
+actual model choice, cost, and privacy reasoning below are
+unaffected; only the integration mechanism changes, and the "Native
+CocoIndex integration" bullet below is corrected to match.*
+
+**Why:**
+- **Free allocation suited to development.** Voyage grants every
+  account a lifetime 200M free tokens on the voyage-4 generation,
+  verified against Voyage's own pricing page (Sep 2026). A typical
+  portfolio repo produces ~100k–400k tokens per ingestion, so 200M
+  covers a very large amount of iteration and re-ingestion during
+  development without daily quota resets. **Caveat confirmed during
+  slice 3 step 2 implementation:** an account with no payment method
+  on file is throttled to 3 requests/minute and 10K tokens/minute
+  regardless of remaining free-token balance — CocoIndex's embedder
+  treats HTTP 429 as retryable and backs off silently rather than
+  failing fast, so indexing a real repo under this limit appears to
+  hang rather than error. Adding a payment method lifts the limit
+  (the free-token grant still applies). Worth doing before any
+  real-repo ingestion test, not just a quota-exhaustion concern.
+- **Low paid cost at overflow.** $0.02 per million tokens beyond the
+  free grant. Even ingesting hundreds of large repos stays inside a
+  handful of dollars.
+- **Better privacy posture for private repositories.** RepoViva
+  supports private GitHub repos (decision 001). Voyage's terms do
+  not include a training-on-inputs clause. Gemini's free tier does
+  ("free-tier data may be used to improve Google's products"), which
+  would be a real problem the moment a user connects a private repo.
+  Voyage removes that landmine.
+- **Native CocoIndex integration.** `cocoindex.ops.litellm.LiteLLMEmbedder("voyage/voyage-4-lite")`
+  is a one-liner in the flow file, implements `VectorSchemaProvider`
+  for the pgvector column, and needs no custom `@coco.fn` embedder —
+  CocoIndex's own embedding integration goes through LiteLLM, not a
+  separate Voyage-specific function.
+- **Shared vector space across the voyage-4 family.** If quality
+  needs push us to `voyage-4` ($0.06/M, same 200M free grant) or
+  `voyage-4-large` ($0.12/M), we can switch models without
+  re-indexing — the vectors from any voyage-4 model live in the same
+  space per Voyage's docs.
+
+**Alternatives considered:**
+- **Gemini `text-embedding-004`** (native CocoIndex support,
+  free tier, 768-dim). Rejected primarily because the free tier's
+  data-for-training clause conflicts with our private-repo support.
+  Secondary concerns: Google has cut free-tier quotas without
+  notice historically (50–80% reductions in Dec 2025); the newer
+  `gemini-embedding-001` reportedly returns a quota of 0 for free-
+  tier accounts, so we'd be locked to the older model; and Google
+  no longer publishes exact free-tier per-model rate limits in
+  their public docs, only in AI Studio for each account.
+- **Voyage `voyage-code-3`** (code-tuned, would have been the
+  obvious pick). Rejected because it is not on Voyage's free tier
+  despite the name — their pricing table places it in "older
+  models" at $0.18/M with zero free allocation. `voyage-4-lite`
+  costs 9× less and is on the free grant.
+- **OpenAI `text-embedding-3-small`.** No ongoing free tier; new
+  accounts get a small credit that expires. Removed on cost
+  grounds during development.
+- **Local `sentence-transformers/all-MiniLM-L6-v2`** (CocoIndex's
+  canonical example). Rejected because loading the model in
+  both Repository Service and Voice Service doubles the RAM cost
+  on small hosts, CPU inference is slow, and cold-start image
+  size grows.
+
+**Tradeoff:**
+- **Model choice is now sticky.** Changing embedding provider or
+  model dimension later requires re-embedding every chunk of every
+  ingested repository. There's no cheap "swap the model" path once
+  we have real data. This is not unique to Voyage — it's true of
+  any embedder — but it's worth naming as the cost of picking now.
+  Voyage's shared vector space within the voyage-4 family softens
+  this for intra-family upgrades but not for switching providers.
+- **External dependency.** Ingestion and query both fail if
+  Voyage's API is down. For MVP scale (~10 concurrent interviews),
+  this is acceptable; if downtime bites, we can revisit with a
+  local fallback.
+- **Free-tier grant is per-account, not renewable.** Once the 200M
+  is spent, all embedding is paid. Not a problem at MVP scale, but
+  a real cost lever if RepoViva ever gains real users.
+
+**Revisit when:**
+- Voyage's free grant is exhausted and paid cost becomes a
+  meaningful operational expense.
+- Retrieval quality on real interviews is materially worse than a
+  code-tuned alternative would offer (evaluate against
+  `voyage-code-3` paid, or `voyage-4` / `voyage-4-large`).
+- Voyage's terms of service or pricing structure change in a way
+  that reopens the trade.
+
+---
+
+## 031 — Repository Service owns `code_chunks` DDL; CocoIndex mounts it as user-managed
+
+**Decision:**
+The `code_chunks` table (and its pgvector index) is created by
+Repository Service itself, via `sql/schema.sql` applied through
+`db.apply_schema()` in the FastAPI lifespan — not by CocoIndex.
+`indexing/flow.py` mounts the table with
+`postgres.mount_table_target(..., managed_by=ManagedBy.USER)`, so
+CocoIndex's per-repository indexing App (one App per `repository_id`,
+per `indexing/app.py`) only reconciles rows against the table; it
+never issues `CREATE TABLE`/`ALTER TABLE`/`DROP TABLE`.
+
+The table's primary key is `(repository_id, id)`, not bare `id`.
+
+**Why:**
+Implementing and testing real indexing (slice 3 step 2) surfaced two
+bugs in the original design, both invisible until a *second*
+repository was actually indexed against the same table:
+
+- **`DuplicateTableError` on every repository after the first.**
+  Each `repository_id` gets its own CocoIndex App with independent
+  tracked state. A fresh App has no record of a table a *different*
+  App already created, so on its first mount it issued a plain
+  `CREATE TABLE` (CocoIndex's own state-diffing logic only adds
+  `IF NOT EXISTS` when its *own* tracked history shows a prior
+  version of the table) — which fails against a table that
+  physically exists already. This would have broken real ingestion
+  the moment a second repository was ever indexed.
+- **Silent cross-repository data loss.** CocoIndex's `generate_id()`
+  is a sequential counter scoped per App, starting at 1 — not
+  globally unique. With one App per repository and a bare `id`
+  primary key, two repositories' first chunk both land on `id=1`.
+  Row writes are `INSERT ... ON CONFLICT (id) DO UPDATE`, so the
+  second repository indexed did not error — it silently overwrote
+  the first repository's row, including its `repository_id`. This
+  was found only by querying Postgres after indexing two repositories
+  in sequence, not from any exception or log line.
+
+Making the application own the DDL (rather than CocoIndex) fixes the
+first bug directly: the table already exists before any App ever
+mounts it, so there is no "first App to see it" race. Widening the
+primary key to `(repository_id, id)` fixes the second: two
+repositories' colliding `id=1` no longer collide as *rows*, since
+Postgres now treats `(repo-a, 1)` and `(repo-b, 1)` as distinct keys.
+
+**Alternatives considered:**
+- **One shared CocoIndex App for all repositories** (source_dir and
+  repository_id as row-level data instead of App identity). Would
+  sidestep both bugs structurally, but changes the ingestion
+  execution model (one long-lived App vs. one per ingestion run) and
+  is a bigger change than the bug warranted. Rejected for now —
+  revisit if per-repository App overhead becomes a real cost.
+- **UUIDs instead of `generate_id()` for `id`.** Would give globally
+  unique IDs without a composite key, but throws away CocoIndex's
+  built-in memoization (`generate_id` returns the same id for the
+  same dependency value across incremental re-indexing runs, which
+  is what makes re-ingesting an unchanged file a no-op). Rejected —
+  the composite key gets uniqueness without losing that.
+
+**Tradeoff:**
+- `table.declare_vector_index(column="embedding")` in `flow.py`
+  still runs on every App's `app_main`, independent of
+  `managed_by`. It reconciles via `DROP INDEX IF EXISTS` +
+  `CREATE INDEX`, so it's idempotent and never errors, but a fresh
+  App (a repository's first-ever index run) has no tracked record of
+  the index either, so it always rebuilds it — a wasted
+  drop+recreate of the shared `ivfflat` index on every new
+  repository's first run. Accepted for now since it's a correctness
+  no-op, not a correctness bug, and repositories are not indexed
+  concurrently at MVP scale.
+- `sql/schema.sql` and `indexing/schema.py`'s `CodeChunk` dataclass
+  must be kept in sync by hand — there is no single source of truth
+  generating both. A mismatch would surface as a Postgres error on
+  the first write after a `CodeChunk` field changes without a
+  matching `schema.sql` update.
+- DDL ownership is now split from the CocoIndex flow that most
+  directly depends on its shape, which is slightly less
+  discoverable than “the flow file creates its own table.” Comments
+  in both `flow.py` and `schema.sql` cross-reference each other to
+  mitigate this.
+
+**Revisit when:**
+- A second CocoIndex-backed table is added and the same
+  `managed_by=ManagedBy.USER` + hand-written DDL pattern needs to be
+  repeated — worth extracting a shared helper at that point.
+- Per-repository Apps' vector-index rebuild-on-first-run cost becomes
+  measurable (e.g. large repositories or many repositories indexed
+  concurrently) — consider pre-creating the index in `schema.sql` in
+  a way CocoIndex recognizes as already matching, or moving to a
+  single shared App (see alternatives above).
+- Repository Service moves to its own Postgres schema (per
+  `architecture.md`'s stated "one schema per service" model, not yet
+  implemented — `code_chunks` currently lives in `public`) — `sql/schema.sql`
+  and `apply_schema()` would need a schema-qualified table name.
