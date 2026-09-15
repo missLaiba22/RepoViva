@@ -1,4 +1,3 @@
-# repository-service/src/repository_service/ingestion/orchestrator.py
 """Runs the ingestion pipeline for a repository.
 
 Called from the /ingest endpoint as a background task. Emits status
@@ -16,6 +15,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from repository_service.db import get_db_pool
+from repository_service.indexing import run_indexing
 from repository_service.ingestion.fetcher import FetchError, fetch_repository
 from repository_service.internal.core_api_client import get_core_api_client
 
@@ -36,8 +37,9 @@ async def run_ingestion(
 
     await client.emit_event(repository_id, "ingestion.started")
 
+    # --- Fetch ---
     try:
-        clone_path = await fetch_repository(
+        fetch_result = await fetch_repository(
             repository_id=repository_id,
             github_url=github_url,
             workspace_root=workspace_root,
@@ -48,8 +50,7 @@ async def run_ingestion(
             repository_id,
         )
         await client.emit_event(
-            repository_id,
-            "ingestion.failed",
+            repository_id, "ingestion.failed",
             data={"error_message": f"fetch failed: {exc}"},
         )
         return
@@ -59,18 +60,36 @@ async def run_ingestion(
             repository_id,
         )
         await client.emit_event(
-            repository_id,
-            "ingestion.failed",
+            repository_id, "ingestion.failed",
             data={"error_message": f"unexpected error: {exc}"},
         )
         return
 
     logger.info(
-        "ingestion fetch complete: repository_id=%s clone_path=%s",
-        repository_id, clone_path,
+        "ingestion fetch complete: repository_id=%s clone_path=%s commit_sha=%s",
+        repository_id, fetch_result.clone_path, fetch_result.commit_sha[:7],
     )
 
-    # TODO(next step): CocoIndex parse/chunk/embed goes here.
+    # --- Indexing ---
+    try:
+        await run_indexing(
+            repository_id=repository_id,
+            commit_sha=fetch_result.commit_sha,
+            source_dir=fetch_result.clone_path,
+            pool=get_db_pool(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "ingestion failed at indexing stage: repository_id=%s",
+            repository_id,
+        )
+        await client.emit_event(
+            repository_id, "ingestion.failed",
+            data={"error_message": f"indexing failed: {exc}"},
+        )
+        return
+
+    logger.info("ingestion indexing complete: repository_id=%s", repository_id)
 
     await client.emit_event(repository_id, "ingestion.completed")
     logger.info("ingestion completed: repository_id=%s", repository_id)

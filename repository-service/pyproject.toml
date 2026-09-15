@@ -12,6 +12,10 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     # Outbound HTTP (callbacks to Core API)
     "httpx>=0.28.1",
+    "asyncpg>=0.30.0",
+    "cocoindex>=0.3.0",             # NEW
+    "python-dotenv>=1.0.0",
+    "litellm>=1.101.0",
 ]
 
 [dependency-groups]

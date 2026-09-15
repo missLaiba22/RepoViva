@@ -1,4 +1,5 @@
 # repository-service/tests/test_fetcher.py
+
 """Tests for the git-clone fetcher.
 
 The happy-path test hits GitHub over the network. This is a real
@@ -26,11 +27,12 @@ async def test_clones_public_repo_shallow(tmp_path: Path) -> None:
         workspace_root=tmp_path,
     )
 
-    assert result == tmp_path / "test-hello"
-    assert result.is_dir()
-    assert (result / ".git").is_dir()
+    assert result.clone_path == tmp_path / "test-hello"
+    assert result.clone_path.is_dir()
+    assert (result.clone_path / ".git").is_dir()
     # Hello-World has a README (no extension) at the top level.
-    assert (result / "README").is_file()
+    assert (result.clone_path / "README").is_file()
+    assert len(result.commit_sha) == 40
 
 
 @pytest.mark.integration
@@ -42,3 +44,4 @@ async def test_invalid_url_raises_fetch_error(tmp_path: Path) -> None:
             github_url="https://github.com/definitely-not-a-real-user-9x8z7q/nope.git",
             workspace_root=tmp_path,
         )
+

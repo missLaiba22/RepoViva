@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Persists across service restarts — the clone is scratch space for
     # the ingestion pipeline, but keeping it around makes re-ingestion cheap.
     workspace_root: Path
+    database_url: str 
 
 
 @lru_cache
