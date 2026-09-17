@@ -21,8 +21,9 @@ Thumbs.db
 *.swp
 # Personal
 core-api/journal.md
-# One-off diagnostic scripts — never committed
-_*.py
+# One-off diagnostic scripts — never committed (but not dunder files
+# like __init__.py, which start with two underscores)
+_[!_]*.py
 
 # Where cloned repositories live on disk. Directory is created on demand.
 WORKSPACE_ROOT=./workspace

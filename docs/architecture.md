@@ -203,11 +203,36 @@ in a terminal state: ready or failed)
 
 Deduplication by event_id is not implemented for MVP — see decision 029.
 
+**Implemented (retrieval endpoint):**
+
 Voice Service → Repository Service (retrieval)
 ```
-POST /internal/v1/retrieve
+POST /internal/v1/repositories/{repository_id}/retrieve
+body: {
+  query: string,
+  top_k?: int = 10,               // 1-50
+  filename_prefix?: string,
+  exclude_chunk_ids?: int[] = []
+}
+→ 200 OK: { chunks: [ { id, content, filename, start_line, end_line,
+                         language, similarity }, ... ] }
+→ 401 Unauthorized (missing or invalid HMAC signature)
+→ 422 Unprocessable Entity (malformed body — FastAPI's default
+  validation response)
+→ 502 Bad Gateway (embedding provider call failed)
 ```
-Returns top-K relevant code chunks for a query + repo. Detailed shape TBD.
+Always 200 with `chunks: []` if nothing matches — Repository Service has
+no local record of ingestion status (that lives in Core API, reached only
+via outbound callbacks, never queried back), so it cannot distinguish
+"unknown repository_id" from "ingestion still running" from "done." Core
+API already gates `POST /v1/interviews` on repo status `ready`, so by the
+time this endpoint is called ingestion is expected to be complete. See
+`decisions.md` for the full reasoning.
+
+Nearest chunks are found via pgvector cosine distance (`<=>`) against
+`code_chunks.embedding`, scoped to `repository_id` only — no `commit_sha`
+filter, since no re-ingestion path exists yet and an interview session
+references a repository, not a specific commit.
 
 Core API → Evaluation Service (report generation)
 ```

@@ -759,3 +759,86 @@ Postgres now treats `(repo-a, 1)` and `(repo-b, 1)` as distinct keys.
   `architecture.md`'s stated "one schema per service" model, not yet
   implemented — `code_chunks` currently lives in `public`) — `sql/schema.sql`
   and `apply_schema()` would need a schema-qualified table name.
+
+---
+
+## 032 — Retrieval endpoint: hand-rolled SQL, no commit pinning, 404/409 collapsed to empty 200
+
+**Decision:**
+`POST /internal/v1/repositories/{repository_id}/retrieve` (Voice Service's
+only way to pull code context during an interview) is implemented as one
+hand-written asyncpg query against `code_chunks`, not a vector-store
+library. It takes `repository_id` as `int` in the path (stringified once,
+same as `/ingest`) and does not accept or filter on `commit_sha`. It always
+returns `200` — `{"chunks": [...]}`, empty if nothing matches — never `404`
+or `409`.
+
+**Why:**
+- **No LangChain/vectorstore library.** The query is one `ORDER BY
+  embedding <=> $1 LIMIT $n` with two extra filters; there's no chain,
+  agent, or multi-step retrieval strategy that would justify the
+  abstraction. More importantly, `code_chunks`' schema is owned by this
+  service specifically to get exact control over its primary key and
+  column shape (decision 031) — a generic vectorstore wrapper would either
+  fight that shape or stand up a second, divergent store. Query-side
+  embedding reuses the same `EMBEDDER` (`indexing/embedder.py`) ingestion
+  already uses, called directly — no flow/App machinery needed for a
+  single ad-hoc embed.
+- **No `commit_sha` filter.** No re-ingestion path exists yet anywhere in
+  the codebase (`ingest_trigger` has no "already ingested" check), and an
+  interview session references only `repository_id`
+  (`POST /v1/interviews body: { repository_id }` — no commit). Filtering
+  by `repository_id` alone is therefore both sufficient and honest about
+  what the system currently supports.
+- **404/409 collapsed to 200 + empty array.** Repository Service has no
+  local record of ingestion status — that state lives entirely in Core
+  API, reached only via outbound HMAC callbacks this service sends, never
+  queried back (decision 029). It genuinely cannot tell "unknown
+  `repository_id`" apart from "ingestion still running" apart from "done":
+  CocoIndex writes `code_chunks` rows per-file as ingestion proceeds, so
+  even a nonzero row count doesn't prove completion. Rather than fake a
+  distinction it can't actually make, the endpoint always returns `200`.
+  Core API already gates `POST /v1/interviews` on repo status `ready`, so
+  in the intended flow this endpoint is never called before ingestion is
+  done.
+
+**Alternatives considered:**
+- **LangChain's `PGVector` vectorstore.** Rejected — see above; it wants
+  to own the table shape this service deliberately owns itself.
+- **404 on zero rows, 200 otherwise.** Gives one error signal for
+  obviously-wrong `repository_id`s, but silently returns partial results
+  (200) if ever queried mid-ingestion, with no way to flag that case.
+  Rejected as a false sense of precision — decided directly with the user
+  in favor of the simpler always-200 contract.
+- **Repository Service tracks its own ingestion-status marker** (new
+  table/column) so it could answer 404/409 accurately. Rejected — would
+  duplicate state Core API already owns, contradicting decision 021's
+  strict per-service table ownership, for a distinction the intended
+  caller (Core API-gated interview creation) doesn't need.
+
+**Tradeoff:**
+- **Mixed `commit_sha` per repository is a live latent gap, not yet
+  triggered.** `index_file` is `memo=True` and `id` is content-derived
+  specifically so re-ingesting an unchanged file is a no-op (decision
+  031). If a repository is ever re-ingested at a new commit, unchanged
+  files' rows keep their original `commit_sha` while changed files' rows
+  get the new one — one `repository_id` could end up with chunks stamped
+  from two different commits, invisibly to this endpoint. Not a problem
+  today because there is no re-ingestion trigger yet; becomes real the
+  moment one is built.
+- **A stale or wrong `repository_id` returns an empty result, not an
+  error.** Voice Service (or a caller upstream of it) has no signal from
+  this endpoint alone to distinguish "no relevant chunks for this query"
+  from "this repository was never ingested." Acceptable because Core API
+  is the source of truth for repo status and gates interview creation on
+  it already.
+
+**Revisit when:**
+- A re-ingestion endpoint is built — resolve the mixed-`commit_sha`
+  question then (pin to the ingesting commit at read time, or force a
+  full re-embed on every re-ingest so all rows for a repo always share one
+  commit).
+- Voice Service reports confusing-empty-results incidents that a 404
+  would have caught faster — revisit the always-200 contract, most likely
+  by adding the local status tracking alternative above rather than
+  querying Core API synchronously on the retrieval hot path.
