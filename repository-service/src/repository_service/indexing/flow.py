@@ -48,7 +48,10 @@ async def index_file(
         return
 
     # Repo-relative path — absolute paths would leak the host FS.
-    filename = str(file.file_path.resolve().relative_to(sourcedir))
+    # .as_posix() (not str()) so the stored path always uses forward
+    # slashes, regardless of the host OS indexing ran on — filename_prefix
+    # matching in retrieval.search_chunks assumes this.
+    filename = file.file_path.resolve().relative_to(sourcedir).as_posix()
     language = detect_code_language(filename=filename) or "text"
 
     chunks = SPLITTER.split(
