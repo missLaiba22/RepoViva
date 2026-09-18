@@ -19,8 +19,15 @@ from pathlib import Path
 
 
 def workspace_for(repository_id: str, workspace_root: Path) -> Path:
-    """Return the workspace path for a repository. Does not touch disk."""
-    return workspace_root / repository_id
+    """Return the workspace path for a repository. Does not touch disk.
+
+    Resolved to an absolute path — a relative `workspace_root` (e.g. from
+    `WORKSPACE_ROOT=workspace` in .env) would otherwise reach CocoIndex's
+    `index_file` as a relative `sourcedir`, which can't be compared against
+    the absolute paths CocoIndex resolves internally (`Path.relative_to`
+    requires both sides to agree on absolute vs. relative).
+    """
+    return (workspace_root / repository_id).resolve()
 
 
 def prepare_clean_workspace(repository_id: str, workspace_root: Path) -> Path:
