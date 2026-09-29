@@ -12,6 +12,11 @@ import asyncpg
 import numpy as np
 from numpy.typing import NDArray
 
+# Exact nearest-neighbour search (100% recall): there is deliberately no
+# ANN index on `embedding` (decision 033). Postgres narrows to one
+# repository via the PRIMARY KEY (repository_id, id), then computes the
+# distance for each of that repository's rows and sorts.
+#
 # No pgvector codec is registered on the shared asyncpg pool (db.py), so the
 # embedding is sent as a string literal and cast to `vector` in SQL rather
 # than bound as a native array/numpy value.

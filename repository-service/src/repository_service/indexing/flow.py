@@ -108,7 +108,11 @@ async def app_main(
     table = await postgres.mount_table_target(
         PG_DB, "code_chunks", schema, managed_by=ManagedBy.USER
     )
-    table.declare_vector_index(column="embedding")
+    # Deliberately no table.declare_vector_index(): retrieval is exact
+    # search (decision 033). Declaring one here would make every App
+    # DROP + CREATE an index on the shared table on its first run,
+    # overriding sql/schema.sql. Apps that declared one in the past see it
+    # as removed and issue a harmless DROP INDEX IF EXISTS.
 
     files = localfs.walk_dir(
         sourcedir,

@@ -9,14 +9,11 @@
 -- and indexing/flow.py mounts the table with managed_by=ManagedBy.USER,
 -- meaning CocoIndex only reconciles rows against it, never table structure.
 --
--- Column types, and the vector index's name/method/operator class, are
--- copied to match exactly what
--- cocoindex.connectors.postgres.TableSchema.from_class(CodeChunk, ...) /
--- TableTarget.declare_vector_index(column="embedding") would generate, so
--- CocoIndex's own row encoding and (harmless, idempotent) index
--- drop+recreate on first mount stay compatible with a table it didn't
--- create. Keep this in sync with indexing/schema.py's CodeChunk dataclass
--- and indexing/flow.py's declare_vector_index() call if either changes.
+-- Column types are copied to match exactly what
+-- cocoindex.connectors.postgres.TableSchema.from_class(CodeChunk, ...)
+-- would generate, so CocoIndex's own row encoding stays compatible with a
+-- table it didn't create. Keep this in sync with indexing/schema.py's
+-- CodeChunk dataclass if it changes.
 --
 -- PRIMARY KEY is (repository_id, id) rather than bare id: `id` comes from
 -- CocoIndex's IdGenerator, a sequential counter scoped per App (starts
@@ -40,11 +37,12 @@ CREATE TABLE IF NOT EXISTS code_chunks (
     PRIMARY KEY (repository_id, id)
 );
 
--- Name, method, and operator class match what
--- declare_vector_index(column="embedding") derives by default:
--- index name   = "{table_name}__vector__{name or column}"
--- metric       = "cosine" -> vector_cosine_ops
--- method       = "ivfflat"
-CREATE INDEX IF NOT EXISTS "code_chunks__vector__embedding"
-    ON code_chunks
-    USING ivfflat ("embedding" vector_cosine_ops);
+-- No ANN (ivfflat/hnsw) index on `embedding` — retrieval is exact
+-- nearest-neighbour search, scoped by the primary key's leading
+-- repository_id column (decision 033). No separate B-tree on
+-- repository_id is needed: PRIMARY KEY (repository_id, id) already is one.
+--
+-- Earlier versions created an ivfflat index here at startup, on an empty
+-- table, so its k-means lists were never trained on real data. Drop it
+-- from existing databases so they get exact search too.
+DROP INDEX IF EXISTS "code_chunks__vector__embedding";
