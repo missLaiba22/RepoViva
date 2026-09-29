@@ -842,3 +842,218 @@ or `409`.
   would have caught faster — revisit the always-200 contract, most likely
   by adding the local status tracking alternative above rather than
   querying Core API synchronously on the retrieval hot path.
+
+---
+
+## 033 — Exact vector search, a 6,000-chunk repository cap, and no translated docs
+
+**Decision:**
+- **Exact search, no ANN index.** `code_chunks` has no approximate-nearest-
+  neighbour index on `embedding`. `retrieval/search.py` narrows to one
+  repository via `PRIMARY KEY (repository_id, id)`, computes cosine
+  distance for every row of that repository, and sorts. `sql/schema.sql`
+  drops the old `code_chunks__vector__embedding` ivfflat index;
+  `indexing/flow.py` no longer calls `table.declare_vector_index()`.
+- **Repository cap: 6,000 chunks, chosen conservatively** (`MAX_REPO_CHUNKS`,
+  `indexing/runner.py`; see "the binding budget" below for what it is and
+  is not derived from). `run_indexing()` counts chunks in a local
+  pre-pass — same `PATH_MATCHER`, same `split_source()` as the flow, no
+  API calls — and raises `RepositoryTooLargeError` **before any embedding
+  call** if the count exceeds the cap. The orchestrator reports it as
+  `ingestion.failed` with `"repository too large: N chunks (limit 6,000)"`.
+- **Translated docs are not indexed.** `EXCLUDED_PATTERNS` in `flow.py`
+  drops `**/docs/<language code>/**` (explicit list of codes, so ordinary
+  `docs/api/`, `docs/guide/` stay) and Docusaurus `**/i18n/**`.
+
+This supersedes the vector-index tradeoff noted in decision 031. No HNSW.
+
+**Why — the index:**
+The ivfflat index had three defects, in order of severity:
+
+1. **Built on an empty table.** `apply_schema()` created it at startup,
+   before any repository existed. ivfflat trains k-means centroids at build
+   time; with no rows they are meaningless. Per-repository ivfflat indexes
+   would repeat the bug — each also built on zero rows.
+2. **`ivfflat.probes` defaulted to 1** — one list of 100 probed. Never set.
+3. **Post-index filtering.** Every query filters on `repository_id`, but
+   the ANN index is scanned first and the `WHERE` applied afterwards, so
+   with many repositories fewer than `top_k` rows survive.
+
+Without an ANN index pgvector does exact search: 100% recall by
+construction, nothing to tune, no empty-table trap.
+
+**Why — the measurements:**
+Local docker-compose Postgres 16 + pgvector 0.8.6 on a dev laptop,
+2026-09-30, `scripts/measure_search.py`, `top_k=10`. Three repositories
+chosen as small, typical, and stress; the stress point is FastAPI with
+translations removed (`14-en`: repository 14's rows minus non-English
+docs, same embeddings), with full FastAPI as an out-of-scope reference.
+
+| Repository | Role | Chunks | First query (ms) | Warm median (ms) | Warm p95 (ms) | Plan |
+|---|---|---:|---:|---:|---:|---|
+| missLaiba22/artisan-marketplace | typical user repo | 549 | 88 / 102 | 9 / 13 | 11 / 16 | PK bitmap scan |
+| pallets/flask | small OSS | 842 | 333 / 40 | 13 / 12 | 22 / 14 | PK bitmap scan |
+| fastapi, translations removed | stress | 7,169 | 103 / 128 | 86 / 87 | 124 / 121 | seq scan |
+| fastapi, full | out of scope | 22,333 | 1,462 / 300 | 254 / 223 | 340 / 287 | seq scan |
+
+*Sample counts and what they do and do not show:*
+- **Warm:** 20 sequential runs per repository per pass, two passes (both
+  shown, `pass 1 / pass 2`). p95 of 20 samples is the 19th-slowest value —
+  indicative, not a tight tail estimate.
+- **First query:** one sample per pass (n=2). This is the first query on
+  a fresh connection, **not a controlled cold start** — no Postgres
+  restart, OS page cache not dropped — so it is a lower bound on true cold
+  latency. The one genuinely cold observation is full FastAPI immediately
+  after ingestion: **1,757 ms** execution, `read=15289` buffers from disk.
+- **One query vector per repository** (its first chunk's embedding).
+  Sufficient for latency because exact search scores every row regardless
+  of the query; it says nothing about retrieval quality (see recall below).
+- Cost is linear: **~11–12 µs per chunk** above ~1,000 chunks, dominated by
+  reading out-of-line (TOAST) 4 KB vectors, not by distance maths. Small
+  repositories use the primary-key index, so their cost is independent of
+  other repositories' data.
+
+*Recall@5 of the translation exclusion* (`evals/recall_eval.py`, golden
+set `evals/golden/fastapi.json`, per-query output in `evals/results/`): 20
+interview-style questions about FastAPI, relevance sets (files/paths)
+written before any results were seen; a docs hit counts in any language.
+
+| Variant | Recall@5 | Strict (code/English only) | MRR | Top-5 slots taken by translations |
+|---|---:|---:|---:|---:|
+| fastapi, full | 90% | 75% | 0.80 | 71 / 100 |
+| fastapi, translations removed | 95% | 95% | 0.87 | 0 / 100 |
+
+Exclusion improved every metric: in the full index, translations of the
+same page filled the top 5 (e.g. OAuth2 question: five Russian / Japanese
+/ Ukrainian copies, and `fastapi/security/oauth2.py` absent). The one miss
+in the excluded variant is a gap in the answer key
+(`docs/en/docs/reference/parameters.md` is relevant but was not listed);
+it misses in both variants equally. 20 queries on one repository: the
+direction is clear, the percentages are not precise — one query is 5
+points. A re-run of the full index gave strict 70% (not 75%) and 72 noise
+slots: Voyage query embeddings vary slightly between calls and reorder
+near-identical translated pages. Recall@5 and MRR reproduced exactly.
+
+The headline is the *strict* column: on the full index, 75% → 95% on code
+and English docs, with 71 of 100 top-5 slots spent on translations. Nothing
+in the codebase — no test, log, or error — would have shown this; only an
+eval did.
+
+**Why — the binding budget:**
+Of the constraints on retrieval — recall, Voyage cost, storage, latency —
+latency is the one that binds. Recall is 100% of exact by construction;
+storage and cost are small at this scale.
+
+- The interview turn target is **4–5 s p95, 3 s aspirational**
+  (`architecture.md`). Retrieval is sequential on that critical path —
+  the LLM cannot start until context is retrieved — at session start
+  (opening question) and after every answer.
+- The rest of the turn (STT, LLM, TTS, inter-service hops) is external
+  and not under this service's control. Retrieval is the one step fully
+  under our control, so it gets a small fixed allotment: **100 ms p95**,
+  ~3% of the aspirational 3 s.
+- It is a **p95** budget, not a median one, because the turn target is
+  itself p95 and an interview has many turns, so each session hits the
+  tail repeatedly. At the measured ~12 µs/chunk the *median* reaches
+  100 ms near 8,000 chunks, but p95 runs ~1.4× the median and reaches it
+  near **6,000** — hence the cap. (An earlier median-based estimate put
+  the threshold at 8,000; that was the wrong percentile.)
+- Cold reads make the first turn the worst one: the opening-question
+  retrieval is exactly when a repository's rows are least likely to be
+  cached. Keeping repositories small keeps that cold read bounded too.
+
+**What the cap is — and is not — derived from.** The 6,000 figure is
+derived from the 100 ms retrieval *sub-budget*, which is self-imposed. It
+is **not** derived from measured user-visible latency. Against the turn
+budget itself the cap is conservative by a wide margin: 7,169 chunks costs
+~120 ms p95 warm, ~20 ms over the sub-budget, in a 4,000–5,000 ms turn where
+the LLM call dominates by roughly thirty times. The number that could
+actually justify a cap is **cold** latency on the opening turn, and that
+is unmeasured: the "first query" column above is not a true cold start.
+6,000 is therefore a deliberately conservative choice, kept because
+rejecting early is cheap to relax later, while silently slow first turns
+are hard to notice. It is not a derived limit.
+
+Under this budget, a typical user repository (549 chunks, p95 ~15 ms)
+has ~10× headroom. The tail — very large or docs-heavy repositories — is
+a product-scope question, not an index question: rejecting it with a
+clear error is cheaper and more honest than making every query approximate.
+
+**Alternatives considered:**
+- **HNSW on the shared table** (`declare_vector_index(method="hnsw")`,
+  matching `schema.sql`, `hnsw.ef_search` / `hnsw.iterative_scan` in
+  `search.py`). No training step, so it suits incremental ingestion, and
+  iterative scan mitigates post-filtering. Rejected for now: it trades
+  recall on every query to serve repositories outside the product's
+  target, and adds tuning and a recall-verification burden.
+- **Per-repository partial indexes.** Rejected: many distinct
+  `repository_id` values means one index object per repository created by
+  DDL on the ingestion path; pgvector's guidance is partial indexes for a
+  few filter values, partitioning for many. Each would also be ivfflat
+  built on an empty repository.
+- **Partitioning by `repository_id`.** Structurally right for this access
+  pattern, but a large change to a table CocoIndex writes into.
+- **Cap check inside `index_file`.** Rejected: files are indexed in
+  parallel and embed as soon as they are split, so the cap would trip only
+  after thousands of paid Voyage calls.
+
+**Tradeoff:**
+- **FastAPI is rejected.** Even with translations removed it has 7,169
+  chunks — a clean, legitimate repository refused to protect a
+  self-imposed sub-budget by ~20 ms. Accepted for now as the cost of a
+  conservative cap; see "Revisit when".
+- **The cap is a measured number, coupled to everything that produced
+  it.** `MAX_REPO_CHUNKS = 6_000` is valid only for: this hardware class,
+  1024-dim `voyage-4-lite` vectors, `top_k=10`, `CHUNK_SIZE=1000` /
+  `CHUNK_OVERLAP=200`, the current `INCLUDED_PATTERNS` /
+  `EXCLUDED_PATTERNS`, and exact search. Changing any of them changes
+  either the chunk count per repository or the cost per chunk, and the
+  cap silently becomes wrong. Nothing enforces this coupling; re-run
+  `scripts/measure_search.py` (latency) and `evals/recall_eval.py`
+  (quality) after any such change and re-derive the cap.
+- The cap and the retrieval method are coupled too: under an ANN index the
+  latency reason for the cap disappears, leaving only Voyage cost and
+  retrieval quality as reasons to limit repository size.
+- `count_chunks()` is deliberately coupled to the flow (shared
+  `PATH_MATCHER` and `split_source()`); verified to match indexed counts
+  exactly on all three repositories (549, 842, 7,169), and kept matching
+  by `tests/test_indexing_flow.py`, which runs the real CocoIndex flow
+  (fake embedder) and asserts rows written == `count_chunks()`. It reads files with
+  `utf-8-sig` while CocoIndex auto-detects encoding, so a non-UTF-8 file
+  could count slightly differently.
+- The pre-pass runs after cloning, so a too-large repository still costs
+  a clone (~40 s for FastAPI) before being rejected; it costs no Voyage.
+- The index is controlled in two places: `schema.sql` drops it and
+  `flow.py` must not declare one. Re-adding `declare_vector_index()` would
+  silently bring one back on the next ingestion;
+  `tests/test_search_chunks.py::test_no_ann_index_on_embedding` guards it.
+- **No delete path exists** (review finding 4). Chunks were removed by
+  hand twice on 2026-09-30: the `14-en` benchmark copy, and repository 14
+  (full FastAPI, 22,333 chunks, indexed before the cap and exclusions and
+  otherwise still `ready` and serving 75%-strict retrieval). For 14 the
+  Core API row was also set to `failed` by hand — a write into another
+  service's table (decision 021). CocoIndex's per-App state for
+  `repoviva-14` still records rows that no longer exist, so re-ingesting
+  that id would need its state reset too.
+- The translation list is explicit language codes; a repository using a
+  code not in the list, or another layout (e.g. `locales/`), still gets
+  its translations indexed.
+
+**Revisit when:**
+- Users routinely hit the cap on repositories the product should serve —
+  that is the signal to adopt HNSW (alternative above), with a recall
+  check against exact search, then partitioning if post-filtering recall
+  degrades.
+- Any coupled parameter above changes (hardware, embedding model or
+  dimension, `top_k`, chunking, include/exclude patterns) — re-measure and
+  re-derive the cap.
+- **A real cold-start measurement exists** (Postgres restarted, OS page
+  cache dropped, first retrieval of an interview). That is the number that
+  should set the cap: if cold opening-turn latency stays well inside the
+  turn budget at 7,000–10,000 chunks, raise the cap to where the *turn*
+  budget breaks, not the sub-budget.
+- Measured warm p95 retrieval on a real deployment exceeds 100 ms for a
+  repository under the cap, or the turn-latency budget tightens.
+- **Repository deletion is exposed in the API, or manual chunk cleanup
+  happens a third time** — build the delete path (chunks + CocoIndex App
+  state) and stop editing rows by hand.
