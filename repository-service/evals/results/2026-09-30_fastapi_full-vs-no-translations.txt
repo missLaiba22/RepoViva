@@ -1,0 +1,82 @@
+golden set: fastapi.json (fastapi/fastapi @ bd41128), 20 queries, k=5, run 2026-09-30 by scratch/recall_eval.py (pre-move)
+variants: 14 = full index, 14-en = translations excluded (same embeddings)
+
+How does FastAPI resolve dependencies and sub-dependencies for a request?
+  [   14] HIT   *docs/hi/docs/tutorial/dependencies/sub-dependencies.md, *docs/ko/docs/tutorial/dependencies/sub-dependencies.md, *docs/fr/docs/tutorial/dependencies/sub-dependencies.md, *docs/pt/docs/tutorial/dependencies/sub-dependencies.md, *docs/en/docs/tutorial/dependencies/sub-dependencies.md
+  [14-en] HIT   *docs/en/docs/tutorial/dependencies/sub-dependencies.md, *docs/en/docs/tutorial/dependencies/sub-dependencies.md, *fastapi/dependencies/utils.py, *fastapi/dependencies/utils.py, fastapi/routing.py
+
+Where is the OpenAPI schema generated for the application?
+  [   14] HIT   docs/de/docs/tutorial/first-steps.md, docs/hi/docs/advanced/generate-clients.md, docs/de/docs/advanced/generate-clients.md, *fastapi/applications.py, docs/hi/docs/tutorial/first-steps.md
+  [14-en] HIT   *fastapi/applications.py, *docs/en/docs/how-to/extending-openapi.md, *fastapi/applications.py, docs/en/docs/tutorial/first-steps.md, *docs/en/docs/how-to/extending-openapi.md
+
+How are background tasks run after the response is sent?
+  [   14] HIT   *docs/hi/docs/tutorial/background-tasks.md, *docs/tr/docs/tutorial/background-tasks.md, *docs/de/docs/tutorial/background-tasks.md, *docs/en/docs/tutorial/background-tasks.md, *docs/fr/docs/tutorial/background-tasks.md
+  [14-en] HIT   *docs/en/docs/tutorial/background-tasks.md, *fastapi/background.py, docs/en/docs/reference/background.md, *fastapi/background.py, tests/test_telemetry/test_background.py
+
+How does OAuth2PasswordBearer extract the bearer token from the Authorization header?
+  [   14] HIT   *docs/ru/docs/tutorial/security/first-steps.md, *docs/ja/docs/tutorial/security/first-steps.md, *docs/ja/docs/tutorial/security/simple-oauth2.md, *docs/ru/docs/tutorial/security/simple-oauth2.md, *docs/uk/docs/tutorial/security/simple-oauth2.md
+  [14-en] HIT   *docs/en/docs/tutorial/security/simple-oauth2.md, tests/test_security_oauth2_authorization_code_bearer.py, *fastapi/security/oauth2.py, tests/test_security_oauth2_authorization_code_bearer.py, *docs/en/docs/tutorial/security/simple-oauth2.md
+
+How is an API key read from a header, query parameter or cookie?
+  [   14] HIT   docs/hi/docs/tutorial/security/index.md, docs/uk/docs/tutorial/security/index.md, *fastapi/security/api_key.py, *fastapi/security/api_key.py, *fastapi/security/api_key.py
+  [14-en] HIT   *fastapi/security/api_key.py, *fastapi/security/api_key.py, *fastapi/security/api_key.py, *fastapi/security/api_key.py, *fastapi/security/api_key.py
+
+How are HTTP Basic auth credentials parsed?
+  [   14] HIT   *docs/en/docs/advanced/security/http-basic-auth.md, *docs/ja/docs/advanced/security/http-basic-auth.md, *docs/ko/docs/advanced/security/http-basic-auth.md, *docs/fr/docs/advanced/security/http-basic-auth.md, *docs/hi/docs/advanced/security/http-basic-auth.md
+  [14-en] HIT   *docs/en/docs/advanced/security/http-basic-auth.md, *fastapi/security/http.py, *docs/en/docs/advanced/security/http-basic-auth.md, *docs/en/docs/advanced/security/http-basic-auth.md, *fastapi/security/http.py
+
+How are Pydantic models converted into JSON-compatible data?
+  [   14] HIT   *docs/ko/docs/tutorial/encoder.md, *docs/zh/docs/tutorial/encoder.md, *docs/en/docs/tutorial/encoder.md, *docs/zh-hant/docs/tutorial/encoder.md, *docs/pt/docs/tutorial/encoder.md
+  [14-en] HIT   *docs/en/docs/tutorial/encoder.md, *docs/en/docs/tutorial/encoder.md, docs/en/docs/advanced/response-directly.md, tests/test_jsonable_encoder.py, tests/test_jsonable_encoder.py
+
+How does the router match a request to a path operation and call the endpoint function?
+  [   14] MISS  docs/hi/docs/tutorial/dependencies/index.md, docs/tr/docs/tutorial/bigger-applications.md, docs/en/docs/tutorial/bigger-applications.md, docs/pt/docs/tutorial/first-steps.md, docs/en/docs/tutorial/first-steps.md
+  [14-en] HIT   docs/en/docs/tutorial/bigger-applications.md, docs/en/docs/tutorial/first-steps.md, *fastapi/routing.py, *fastapi/routing.py, fastapi/telemetry/_api.py
+
+How is an HTTPException turned into a JSON error response?
+  [   14] HIT   *docs/hi/docs/tutorial/handling-errors.md, *docs/ru/docs/tutorial/handling-errors.md, *docs/ja/docs/tutorial/handling-errors.md, *docs/tr/docs/tutorial/handling-errors.md, *docs/en/docs/tutorial/handling-errors.md
+  [14-en] HIT   *docs/en/docs/tutorial/handling-errors.md, *fastapi/exception_handlers.py, *docs/en/docs/tutorial/handling-errors.md, *docs/en/docs/tutorial/handling-errors.md, *fastapi/exception_handlers.py
+
+How do I declare optional query parameters with default values?
+  [   14] HIT   *docs/hi/docs/tutorial/query-params.md, *docs/hi/docs/tutorial/query-params-str-validations.md, *docs/de/docs/tutorial/query-params.md, *docs/ru/docs/tutorial/query-params.md, *docs/en/docs/tutorial/query-params.md
+  [14-en] HIT   *docs/en/docs/tutorial/query-params.md, *docs/en/docs/tutorial/query-params-str-validations.md, *docs/en/docs/tutorial/query-params.md, *docs/en/docs/tutorial/query-params.md, *docs/en/docs/tutorial/query-params.md
+
+How do I receive uploaded files with UploadFile?
+  [   14] HIT   *docs/hi/docs/tutorial/request-files.md, *docs/hi/docs/tutorial/request-files.md, *docs/uk/docs/tutorial/request-files.md, *docs/es/docs/tutorial/request-files.md, *docs/en/docs/tutorial/request-files.md
+  [14-en] HIT   *docs/en/docs/tutorial/request-files.md, docs/en/docs/reference/uploadfile.md, *docs/en/docs/tutorial/request-files.md, *docs/en/docs/tutorial/request-files.md, *docs/en/docs/tutorial/request-files.md
+
+How do I enable CORS for a frontend on another origin?
+  [   14] HIT   *docs/tr/docs/tutorial/cors.md, *docs/en/docs/tutorial/cors.md, *docs/ko/docs/tutorial/cors.md, *docs/hi/docs/tutorial/cors.md, *docs/en/docs/tutorial/cors.md
+  [14-en] HIT   *docs/en/docs/tutorial/cors.md, *docs/en/docs/tutorial/cors.md, *docs/en/docs/tutorial/cors.md, *docs/en/docs/tutorial/cors.md, *docs/en/docs/tutorial/cors.md
+
+How are WebSocket connections accepted and messages received?
+  [   14] HIT   *docs_src/websockets_/tutorial003_py310.py, *docs_src/websockets_/tutorial001_py310.py, *docs_src/websockets_/tutorial003_py310.py, *docs_src/websockets_/tutorial003_py310.py, *docs_src/websockets_/tutorial002_py310.py
+  [14-en] HIT   *docs_src/websockets_/tutorial003_py310.py, *docs_src/websockets_/tutorial001_py310.py, *docs_src/websockets_/tutorial003_py310.py, *docs_src/websockets_/tutorial003_py310.py, *docs_src/websockets_/tutorial002_py310.py
+
+How do I mount a separate sub-application under a path prefix?
+  [   14] HIT   *docs/de/docs/advanced/sub-applications.md, *docs/tr/docs/advanced/sub-applications.md, *docs/ja/docs/advanced/sub-applications.md, *docs/hi/docs/advanced/sub-applications.md, *docs/ko/docs/advanced/sub-applications.md
+  [14-en] HIT   *docs/en/docs/advanced/sub-applications.md, *docs/en/docs/advanced/sub-applications.md, *docs/en/docs/advanced/sub-applications.md, *docs/en/docs/advanced/sub-applications.md, *docs_src/sub_applications/tutorial001_py310.py
+
+How do I override a dependency when testing?
+  [   14] HIT   *docs/hi/docs/advanced/testing-dependencies.md, *docs/en/docs/advanced/testing-dependencies.md, *docs/ko/docs/advanced/testing-dependencies.md, *docs/tr/docs/advanced/testing-dependencies.md, *docs/ja/docs/advanced/testing-dependencies.md
+  [14-en] HIT   *docs/en/docs/advanced/testing-dependencies.md, *docs/en/docs/advanced/testing-dependencies.md, *docs/en/docs/advanced/testing-dependencies.md, *docs/en/docs/advanced/testing-dependencies.md, tests/test_dependency_overrides.py
+
+How does FastAPI stream server-sent events?
+  [   14] HIT   fastapi/.agents/skills/fastapi/references/streaming.md, *docs_src/server_sent_events/tutorial005_py310.py, fastapi/routing.py, *docs_src/server_sent_events/tutorial003_py310.py, *docs/ru/docs/tutorial/server-sent-events.md
+  [14-en] HIT   fastapi/.agents/skills/fastapi/references/streaming.md, *docs_src/server_sent_events/tutorial005_py310.py, fastapi/routing.py, *docs_src/server_sent_events/tutorial003_py310.py, *docs/en/docs/tutorial/server-sent-events.md
+
+Where are the Query, Path, Body and Header parameter functions defined?
+  [   14] MISS  docs/en/docs/reference/parameters.md, docs/ko/docs/tutorial/header-params.md, docs/hi/docs/tutorial/header-params.md, docs/hi/docs/tutorial/header-params.md, docs/hi/docs/tutorial/body.md
+  [14-en] MISS  docs/en/docs/reference/parameters.md, docs/en/docs/tutorial/header-params.md, docs/en/docs/tutorial/body-multiple-params.md, docs/en/docs/tutorial/body.md, docs/en/docs/tutorial/query-params.md
+
+How are synchronous endpoint functions run in a threadpool?
+  [   14] HIT   *fastapi/routing.py, *docs/hi/docs/async.md, *docs/pt/docs/async.md, *docs/de/docs/async.md, *docs/en/docs/async.md
+  [14-en] HIT   *fastapi/routing.py, *docs/en/docs/async.md, *docs/en/docs/async.md, tests/test_dependency_wrapped.py, *docs/en/docs/async.md
+
+How does response_model filter the data returned by an endpoint?
+  [   14] HIT   *docs/hi/docs/tutorial/response-model.md, *docs/uk/docs/tutorial/response-model.md, *docs/ru/docs/tutorial/response-model.md, *docs/tr/docs/tutorial/response-model.md, *docs/hi/docs/tutorial/response-model.md
+  [14-en] HIT   tests/test_response_model_data_filter.py, *docs/en/docs/tutorial/response-model.md, *docs/en/docs/tutorial/response-model.md, tests/test_response_model_as_return_annotation.py, tests/test_response_model_data_filter_no_inheritance.py
+
+How do lifespan startup and shutdown events work?
+  [   14] HIT   *docs/en/docs/advanced/events.md, *docs/ja/docs/advanced/events.md, *docs/tr/docs/advanced/events.md, *docs/de/docs/advanced/events.md, *docs/hi/docs/advanced/events.md
+  [14-en] HIT   *docs/en/docs/advanced/events.md, *docs/en/docs/advanced/events.md, *docs/en/docs/advanced/events.md, *docs/en/docs/advanced/events.md, *docs/en/docs/advanced/events.md

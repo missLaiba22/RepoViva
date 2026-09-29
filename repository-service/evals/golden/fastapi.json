@@ -1,0 +1,165 @@
+{
+  "repository": "fastapi/fastapi",
+  "commit": "bd41128",
+  "k": 5,
+  "written": "2026-09-30, before any retrieval results were seen",
+  "notes": "Relevance = regexes matched against repo-relative filenames. docs/[^/]+/docs/ matches documentation in any language.",
+  "noise_pattern": "^docs/(?!en/)[^/]+/",
+  "queries": [
+    {
+      "query": "How does FastAPI resolve dependencies and sub-dependencies for a request?",
+      "relevant": [
+        "fastapi/dependencies/",
+        "docs/[^/]+/docs/tutorial/dependencies/"
+      ]
+    },
+    {
+      "query": "Where is the OpenAPI schema generated for the application?",
+      "relevant": [
+        "fastapi/openapi/utils\\.py",
+        "fastapi/applications\\.py",
+        "docs/[^/]+/docs/how-to/extending-openapi"
+      ]
+    },
+    {
+      "query": "How are background tasks run after the response is sent?",
+      "relevant": [
+        "fastapi/background\\.py",
+        "docs/[^/]+/docs/tutorial/background-tasks",
+        "docs_src/background_tasks/"
+      ]
+    },
+    {
+      "query": "How does OAuth2PasswordBearer extract the bearer token from the Authorization header?",
+      "relevant": [
+        "fastapi/security/oauth2\\.py",
+        "docs/[^/]+/docs/tutorial/security/"
+      ]
+    },
+    {
+      "query": "How is an API key read from a header, query parameter or cookie?",
+      "relevant": [
+        "fastapi/security/api_key\\.py"
+      ]
+    },
+    {
+      "query": "How are HTTP Basic auth credentials parsed?",
+      "relevant": [
+        "fastapi/security/http\\.py",
+        "docs/[^/]+/docs/advanced/security/http-basic-auth",
+        "docs_src/security/"
+      ]
+    },
+    {
+      "query": "How are Pydantic models converted into JSON-compatible data?",
+      "relevant": [
+        "fastapi/encoders\\.py",
+        "docs/[^/]+/docs/tutorial/encoder",
+        "docs_src/encoder/"
+      ]
+    },
+    {
+      "query": "How does the router match a request to a path operation and call the endpoint function?",
+      "relevant": [
+        "fastapi/routing\\.py"
+      ]
+    },
+    {
+      "query": "How is an HTTPException turned into a JSON error response?",
+      "relevant": [
+        "fastapi/exception_handlers\\.py",
+        "fastapi/exceptions\\.py",
+        "docs/[^/]+/docs/tutorial/handling-errors",
+        "docs_src/handling_errors/"
+      ]
+    },
+    {
+      "query": "How do I declare optional query parameters with default values?",
+      "relevant": [
+        "docs/[^/]+/docs/tutorial/query-params",
+        "docs_src/query_params/"
+      ]
+    },
+    {
+      "query": "How do I receive uploaded files with UploadFile?",
+      "relevant": [
+        "fastapi/datastructures\\.py",
+        "docs/[^/]+/docs/tutorial/request-files",
+        "docs_src/request_files/"
+      ]
+    },
+    {
+      "query": "How do I enable CORS for a frontend on another origin?",
+      "relevant": [
+        "docs/[^/]+/docs/tutorial/cors",
+        "fastapi/middleware/cors\\.py",
+        "docs_src/cors/"
+      ]
+    },
+    {
+      "query": "How are WebSocket connections accepted and messages received?",
+      "relevant": [
+        "fastapi/websockets\\.py",
+        "docs/[^/]+/docs/advanced/websockets",
+        "docs_src/websockets_/",
+        "fastapi/routing\\.py"
+      ]
+    },
+    {
+      "query": "How do I mount a separate sub-application under a path prefix?",
+      "relevant": [
+        "docs/[^/]+/docs/advanced/sub-applications",
+        "docs_src/sub_applications/"
+      ]
+    },
+    {
+      "query": "How do I override a dependency when testing?",
+      "relevant": [
+        "docs/[^/]+/docs/advanced/testing-dependencies",
+        "docs_src/dependency_testing/",
+        "fastapi/applications\\.py"
+      ]
+    },
+    {
+      "query": "How does FastAPI stream server-sent events?",
+      "relevant": [
+        "fastapi/sse\\.py",
+        "docs/[^/]+/docs/tutorial/server-sent-events",
+        "docs_src/server_sent_events/"
+      ]
+    },
+    {
+      "query": "Where are the Query, Path, Body and Header parameter functions defined?",
+      "relevant": [
+        "fastapi/param_functions\\.py",
+        "fastapi/params\\.py"
+      ]
+    },
+    {
+      "query": "How are synchronous endpoint functions run in a threadpool?",
+      "relevant": [
+        "fastapi/concurrency\\.py",
+        "fastapi/routing\\.py",
+        "fastapi/dependencies/utils\\.py",
+        "docs/[^/]+/docs/async\\.md"
+      ]
+    },
+    {
+      "query": "How does response_model filter the data returned by an endpoint?",
+      "relevant": [
+        "docs/[^/]+/docs/tutorial/response-model",
+        "docs_src/response_model/",
+        "fastapi/routing\\.py"
+      ]
+    },
+    {
+      "query": "How do lifespan startup and shutdown events work?",
+      "relevant": [
+        "docs/[^/]+/docs/advanced/events",
+        "docs_src/events/",
+        "fastapi/applications\\.py",
+        "fastapi/routing\\.py"
+      ]
+    }
+  ]
+}
