@@ -48,6 +48,21 @@ CHUNK_OVERLAP: Final = 200
 SPLITTER: Final = RecursiveSplitter()
 
 
+def split_source(filename: str, source: str) -> tuple[str, list]:
+    """Return (language, chunks) for one file; no chunks if it's too large.
+
+    Shared by index_file() and the pre-embedding size check in
+    runner.count_chunks(), so the cap counts exactly what gets embedded.
+    """
+    language = detect_code_language(filename=filename) or "text"
+    if len(source.encode("utf-8")) > MAX_FILE_BYTES:
+        return language, []
+    chunks = SPLITTER.split(
+        source, CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, language=language
+    )
+    return language, chunks
+
+
 @coco.fn(memo=True)
 async def index_file(
     file,
@@ -58,19 +73,13 @@ async def index_file(
 ) -> None:
     """Split one file into chunks, embed each, declare one row per chunk."""
     source = await file.read_text()
-    if len(source.encode("utf-8")) > MAX_FILE_BYTES:
-        return
 
     # Repo-relative path — absolute paths would leak the host FS.
     # .as_posix() (not str()) so the stored path always uses forward
     # slashes, regardless of the host OS indexing ran on — filename_prefix
     # matching in retrieval.search_chunks assumes this.
     filename = file.file_path.resolve().relative_to(sourcedir).as_posix()
-    language = detect_code_language(filename=filename) or "text"
-
-    chunks = SPLITTER.split(
-        source, CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, language=language
-    )
+    language, chunks = split_source(filename, source)
     # IdGenerator, not generate_id(): generate_id() returns the *same* id
     # for the same input, so a file containing two identical chunks (common
     # in docs — repeated code samples, admonitions) would declare the same

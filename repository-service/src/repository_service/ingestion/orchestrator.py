@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 
 from repository_service.db import get_db_pool
-from repository_service.indexing import run_indexing
+from repository_service.indexing import RepositoryTooLargeError, run_indexing
 from repository_service.ingestion.fetcher import FetchError, fetch_repository
 from repository_service.internal.core_api_client import get_core_api_client
 
@@ -78,6 +78,16 @@ async def run_ingestion(
             source_dir=fetch_result.clone_path,
             pool=get_db_pool(),
         )
+    except RepositoryTooLargeError as exc:
+        # Expected, user-facing rejection (decision 033) — no traceback.
+        logger.warning(
+            "ingestion rejected: repository_id=%s %s", repository_id, exc,
+        )
+        await client.emit_event(
+            repository_id, "ingestion.failed",
+            data={"error_message": str(exc)},
+        )
+        return
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "ingestion failed at indexing stage: repository_id=%s",
