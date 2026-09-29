@@ -23,7 +23,21 @@ EXCLUDED_PATTERNS: Final = [
     "**/.git/**", "**/node_modules/**", "**/.venv/**",
     "**/dist/**", "**/build/**", "**/vendor/**",
     "**/*.lock", "**/package-lock.json", "**/yarn.lock",
+    # Translated documentation (decision 033). Duplicates the source-language
+    # docs in other languages: on fastapi/fastapi it was 68% of all chunks
+    # and took 71% of top-5 retrieval slots, crowding out code. Language
+    # codes are listed explicitly rather than "docs/* except docs/en" so
+    # ordinary subfolders like docs/api/ or docs/guide/ are kept.
+    "**/docs/{ar,az,bn,de,em,es,fa,fr,he,hi,hu,id,it,ja,ko,nl,pl,pt,pt-BR,"
+    "ru,sv,th,tr,uk,ur,vi,yo,zh,zh-CN,zh-TW,zh-hant,zh-Hant}/**",
+    # Docusaurus keeps translations under i18n/<locale>/.
+    "**/i18n/**",
 ]
+
+PATH_MATCHER: Final = PatternFilePathMatcher(
+    included_patterns=INCLUDED_PATTERNS,
+    excluded_patterns=EXCLUDED_PATTERNS,
+)
 
 MAX_FILE_BYTES: Final = 500 * 1024
 
@@ -117,10 +131,7 @@ async def app_main(
     files = localfs.walk_dir(
         sourcedir,
         recursive=True,
-        path_matcher=PatternFilePathMatcher(
-            included_patterns=INCLUDED_PATTERNS,
-            excluded_patterns=EXCLUDED_PATTERNS,
-        ),
+        path_matcher=PATH_MATCHER,
     ).items()
 
     await coco.mount_each(
