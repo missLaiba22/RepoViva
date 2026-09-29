@@ -7,7 +7,7 @@ from cocoindex.connectors import localfs, postgres
 from cocoindex.connectorkits.target import ManagedBy
 from cocoindex.ops.text import RecursiveSplitter, detect_code_language
 from cocoindex.resources.file import PatternFilePathMatcher
-from cocoindex.resources.id import generate_id
+from cocoindex.resources.id import IdGenerator
 
 from repository_service.indexing.config import PG_DB
 from repository_service.indexing.embedder import EMBEDDER, build_embed_input
@@ -57,13 +57,20 @@ async def index_file(
     chunks = SPLITTER.split(
         source, CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, language=language
     )
+    # IdGenerator, not generate_id(): generate_id() returns the *same* id
+    # for the same input, so a file containing two identical chunks (common
+    # in docs — repeated code samples, admonitions) would declare the same
+    # primary key twice and fail the whole file. next_id() is distinct per
+    # call yet still stable across runs, so re-indexing an unchanged file
+    # remains a no-op.
+    id_gen = IdGenerator()
     for chunk in chunks:
         embed_input = build_embed_input(filename, chunk.text)
         embedding = await EMBEDDER.embed(embed_input)
 
         table.declare_row(
             row=CodeChunk(
-                id=await generate_id(embed_input),
+                id=await id_gen.next_id(embed_input),
                 repository_id=repository_id,
                 commit_sha=commit_sha,
                 filename=filename,
@@ -83,7 +90,7 @@ async def app_main(
     commit_sha: str,
 ) -> None:
     """Wire source → per-file indexer → pgvector target."""
-    # generate_id() below is a per-App sequential counter (starts at 1), not
+    # IdGenerator in index_file() is a per-App sequential counter (starts at 1), not
     # globally unique — with one App per repository_id, two repositories'
     # first chunk both land on id=1. The primary key must include
     # repository_id or the second repository's row silently overwrites the

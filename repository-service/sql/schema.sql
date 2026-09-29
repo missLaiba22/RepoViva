@@ -19,7 +19,7 @@
 -- and indexing/flow.py's declare_vector_index() call if either changes.
 --
 -- PRIMARY KEY is (repository_id, id) rather than bare id: `id` comes from
--- CocoIndex's generate_id(), a sequential counter scoped per App (starts
+-- CocoIndex's IdGenerator, a sequential counter scoped per App (starts
 -- at 1 every time) — not globally unique. With one App per repository_id,
 -- two repositories' first chunk both land on id=1; a bare-id primary key
 -- would let the second repository's row silently overwrite the first's
