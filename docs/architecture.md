@@ -111,7 +111,7 @@ Single database, four schemas (one per service). Each service owns its own table
 
 - **User** — the developer using RepoViva.
 - **Repository** — a GitHub repo the user has connected.
-- **Interview** — a mock interview session against a repository.
+- **Interview** — a mock interview session against a repository. Fields and lifecycle: decision 036.
 - **Turn** — one question and its answer, treated as a single unit.
 - **Report** — the evaluation output at the end of an interview.
 
@@ -137,11 +137,12 @@ GET  /v1/repositories/{id}       single repo, including ingestion status
 
 Interviews
 ```
-POST /v1/interviews              body: { repository_id }  → Interview + session token
-                                 (only allowed if repo status = ready)
-GET  /v1/interviews              list current user's interviews
-GET  /v1/interviews/{id}         single interview
-GET  /v1/interviews/{id}/report  the report
+POST /v1/interviews              body: { repository_id }  → Interview + session token   [implemented]
+                                 201; 404 if repo missing or not yours; 409 if repo not `ready`
+                                 The raw token appears ONLY in this response (decision 035)
+GET  /v1/interviews              list current user's interviews                          [planned]
+GET  /v1/interviews/{id}         single interview                                        [planned]
+GET  /v1/interviews/{id}/report  the report                                              [planned]
 ```
 
 The current user is always derived from the auth token, never from request bodies.
@@ -234,6 +235,25 @@ Nearest chunks are found via pgvector cosine distance (`<=>`) against
 filter, since no re-ingestion path exists yet and an interview session
 references a repository, not a specific commit.
 
+**Planned (decisions 035–036):**
+
+Voice Service → Core API (session token consumption, once per session)
+```
+POST /internal/v1/session-tokens/consume
+body: { token: string }
+→ 200 { interview_id, user_id, repository_id }
+→ 403 { reason: "unknown" | "expired" | "consumed" }
+→ 401 (bad HMAC)  → 422 (malformed body)
+```
+
+Voice Service → Core API (end of session)
+```
+POST /internal/v1/interviews/{interview_id}/events
+body: { event_id, event_type: "interview.completed" | "interview.interrupted",
+        occurred_at, data: { error_message? } }
+→ 202  → 401  → 404  → 422 (illegal transition)
+```
+
 Core API → Evaluation Service (report generation)
 ```
 POST /internal/v1/reports
@@ -309,12 +329,12 @@ see decision 031 for why that split exists and what it fixed.
 ### Interview session (live, over WebSocket)
 
 1. Client calls `POST /v1/interviews` on Core API (allowed only if repo status is `ready`). Core API creates the interview and returns a session token.
-2. Client opens a WebSocket to Voice Service, presenting the session token.
-3. Voice Service validates the token, retrieves repo context via Repository Service's `/internal/v1/retrieve`, generates the opening question via the LLM provider, and streams TTS audio down.
+2. Client opens a WebSocket to Voice Service and sends the session token in its first message, `session.start` — not in the URL, which is commonly logged (decision 035).
+3. Voice Service consumes the token via Core API's `/internal/v1/session-tokens/consume` (once per session; this also moves the interview to `active` and returns its `repository_id`). It then retrieves repo context via Repository Service's `/internal/v1/retrieve`, generates the opening question via the LLM provider (decision 034), and streams TTS audio down.
 4. User speaks. Client streams audio frames up. Voice Service runs STT and VAD on the incoming stream.
 5. On end-of-speech, Voice Service persists the completed turn (question + transcript), then queries Repository Service for context relevant to the user's answer, generates the next question via the LLM, and streams TTS down.
 6. Loop until the interview ends.
-7. On session end (normal or interrupted), Voice Service (or Core API) calls Evaluation Service to generate a report from all completed turns.
+7. On session end, Voice Service reports `interview.completed` or `interview.interrupted` to Core API (decision 036). Which service triggers report generation is decided when Evaluation Service is built.
 
 ## Data Storage
 
@@ -350,7 +370,7 @@ see decision 031 for why that split exists and what it fixed.
 - No API gateway — frontend calls Core API and Voice Service directly (see decision 022).
 - Internal service-to-service HTTP calls are authenticated with HMAC-SHA256 over `timestamp + "." + body`, with a 60-second freshness window and a single shared secret (see decision 027). Each service implements its own HMAC module ("write it twice, deliberately") — the wire format is the contract.
 - Ingestion status *is* observable end-to-end (decision 029, superseding decision 028): Repository Service emits HMAC-signed `ingestion.started`/`ingestion.completed`/`ingestion.failed` callbacks to Core API as the real pipeline runs, and Core API applies a loose state machine and exposes the current state via `GET /v1/repositories/{id}`. Callback delivery is not retried and events are not deduplicated — a callback dropped by network failure leaves the row in whatever state it was last set to, visible to the user as a stuck `queued`/`in_progress` until a later event (if any) corrects it. See decision 029's tradeoffs and revisit triggers.
-Core API's Alembic autogenerate manages only tables with a Core API model (include_object hook, decision 037); other services' tables in the shared database are invisible to it.
+- Core API's Alembic autogenerate manages only tables with a Core API model (`include_object` hook, decision 037); other services' tables in the shared database are invisible to it.
 
 ## Future Evolution
 
@@ -366,6 +386,7 @@ Open decisions that will shape architecture:
 - Logout endpoint (deferred — no state to clean up server-side, so it's a cookie-clear + redirect when needed)
 - Whether to migrate from signed cookies to JWTs if the session payload grows
 - Naming convention on `Base.metadata` to stop Alembic autogenerate from re-detecting constraint drift on every run (small cleanup after slice 2)
+- Repository deletion as a cross-service flow (Core API rows, Repository Service chunks and workspace, Voice turns, Evaluation reports); revisit `interviews.repository_id`'s `ON DELETE NO ACTION` as part of it
 
 Deferred but named in `decisions.md`:
 
@@ -373,5 +394,3 @@ Deferred but named in `decisions.md`:
 - Live session resumption when partial reports prove too limiting
 - Broader application-level encryption if the threat model changes
 - Per-service databases if shared-DB coupling causes real problems
-
-Repository deletion: a cross-service flow (Core API, Repository Service chunks and workspace, Voice turns, Evaluation reports); revisit interviews.repository_id ondelete as part of it.
