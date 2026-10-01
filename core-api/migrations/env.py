@@ -9,7 +9,7 @@ from core_api.config import get_settings
 from core_api.db import Base
 from core_api.users.models import User  # noqa: F401
 from core_api.repositories.models import Repository  # noqa: F401
-
+from core_api.interviews.models import Interview  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -29,6 +29,22 @@ config.set_main_option(
 )
 
 
+def include_object(object, name, type_, reflected, compare_to):
+    """Limit autogenerate to tables Core API owns (decisions 021, 037).
+
+    The database is shared across services. A table that exists in the
+    database (`reflected=True`) but has no Core API model
+    (`compare_to is None`) belongs to another service — e.g. Repository
+    Service's `code_chunks` — and must be ignored, never dropped.
+
+    Tradeoff: if Core API intentionally removes one of its own models,
+    autogenerate will not emit the drop_table; write it by hand.
+    """
+    if type_ == "table" and reflected and compare_to is None:
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -40,6 +56,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -63,12 +80,15 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
             context.run_migrations()
 
 
+# env.py is a script, not a library: this block runs the migration as
+# soon as Alembic loads the file. Everything it uses must be defined above.
 if context.is_offline_mode():
     run_migrations_offline()
 else:

@@ -350,6 +350,7 @@ see decision 031 for why that split exists and what it fixed.
 - No API gateway — frontend calls Core API and Voice Service directly (see decision 022).
 - Internal service-to-service HTTP calls are authenticated with HMAC-SHA256 over `timestamp + "." + body`, with a 60-second freshness window and a single shared secret (see decision 027). Each service implements its own HMAC module ("write it twice, deliberately") — the wire format is the contract.
 - Ingestion status *is* observable end-to-end (decision 029, superseding decision 028): Repository Service emits HMAC-signed `ingestion.started`/`ingestion.completed`/`ingestion.failed` callbacks to Core API as the real pipeline runs, and Core API applies a loose state machine and exposes the current state via `GET /v1/repositories/{id}`. Callback delivery is not retried and events are not deduplicated — a callback dropped by network failure leaves the row in whatever state it was last set to, visible to the user as a stuck `queued`/`in_progress` until a later event (if any) corrects it. See decision 029's tradeoffs and revisit triggers.
+Core API's Alembic autogenerate manages only tables with a Core API model (include_object hook, decision 037); other services' tables in the shared database are invisible to it.
 
 ## Future Evolution
 
@@ -372,3 +373,5 @@ Deferred but named in `decisions.md`:
 - Live session resumption when partial reports prove too limiting
 - Broader application-level encryption if the threat model changes
 - Per-service databases if shared-DB coupling causes real problems
+
+Repository deletion: a cross-service flow (Core API, Repository Service chunks and workspace, Voice turns, Evaluation reports); revisit interviews.repository_id ondelete as part of it.

@@ -1057,3 +1057,316 @@ clear error is cheaper and more honest than making every query approximate.
 - **Repository deletion is exposed in the API, or manual chunk cleanup
   happens a third time** — build the delete path (chunks + CocoIndex App
   state) and stop editing rows by hand.
+
+---
+
+## 034 — Interview questions are generated at runtime by Voice Service
+
+**Decision:**
+Voice Service generates every interview question at runtime, during the
+live session. The opening question is generated at session start
+(retrieval → LLM); each later question is generated after the candidate's
+answer, from retrieval over that answer plus the conversation so far. No
+question plan or question bank is produced ahead of time. Repository
+Service does not generate questions — it ingests and retrieves only
+(decision 023).
+
+**Why:**
+- Two requirements depend on the candidate's live answer — "System can
+  ask relevant follow-up questions" and "Interview maintains conversation
+  context" — so runtime generation is required regardless of how main
+  questions are chosen.
+- No requirement asks for guaranteed coverage of the repository, which is
+  the main thing a pre-built question plan would provide. Adding a planner
+  now would be machinery without a requirement behind it.
+- Generating questions is interview logic, not repository knowledge, so it
+  belongs in Voice Service, which owns the live session.
+
+**Alternatives considered:**
+- **Pre-generate questions at ingestion time (Repository Service).**
+  Rejected: puts interview logic in the wrong service (decision 023), and
+  every interview on the same repository would get the same questions,
+  undermining repeat practice (decision 002).
+- **Hybrid — per-interview topic plan at session start, questions phrased
+  at runtime.** Deferred, not rejected. Mirrors how a human interviewer
+  works and would guarantee coverage, but adds stored plan state. Adopt if
+  the revisit triggers below fire.
+
+**Tradeoff:**
+- The opening turn is the slowest turn: it waits on retrieval and a full
+  LLM call before any audio plays, and its retrieval is the one most
+  likely to hit uncached rows (decision 033).
+- Without a plan, questions may concentrate on a narrow part of the
+  repository or repeat within an interview.
+
+**Consequences:**
+- Turn will record the IDs of the chunks retrieved for each question, so
+  coverage and repetition can be measured, and so `exclude_chunk_ids`
+  (decision 032) can steer retrieval away from already-used code. *To be
+  confirmed when the Turn schema is designed.*
+- Per-turn timing must be logged by stage (retrieval, LLM, TTS), including
+  the opening turn, or the first revisit trigger cannot be checked.
+
+**Revisit when:**
+1. Opening-turn latency exceeds the 4–5 s p95 turn target (decision 006),
+   as measured by per-turn timing logs.
+2. Interviews concentrate on a narrow set of files, measured as distinct
+   files cited across an interview's questions.
+3. Questions repeat within an interview despite chunk exclusion.
+---
+
+## 035 — Interview session tokens: opaque, single-use, hashed, consumed via Core API
+
+**Decision:**
+`POST /v1/interviews` issues a session token that Voice Service exchanges
+with Core API once, when the interview WebSocket starts.
+
+- **Format:** opaque random value, `secrets.token_urlsafe(32)`. No
+  structure, no claims — Voice Service never parses it.
+- **Lifecycle:** single-use; expires 5 minutes after issue if unused. One
+  token per interview. A dropped connection is not resumed (decision
+  008); the user receives a partial report and may start a new interview.
+- **Storage:** Core API stores only a SHA-256 hash of the token, in three
+  columns on `interviews`: `session_token_hash` (unique),
+  `session_token_expires_at`, `session_token_consumed_at`. The raw token
+  is returned once, in the `POST /v1/interviews` response, and never
+  stored.
+- **Transport to Voice:** the client sends the token inside the first
+  WebSocket message (`session.start`) — not in the URL query string,
+  which is commonly logged. Browsers' WebSocket API cannot set custom
+  headers, so an `Authorization` header is not an option.
+- **Consumption:** Voice Service calls Core API:
+
+      POST /internal/v1/session-tokens/consume      (HMAC-signed, decision 027)
+      body: { token: string }
+      → 200 OK  { interview_id, user_id, repository_id }
+      → 403 Forbidden { reason: "unknown" | "expired" | "consumed" }
+      → 401 Unauthorized (missing or invalid HMAC signature)
+      → 422 Unprocessable Entity (malformed body)
+
+  Core API hashes the token and consumes it in one conditional
+  `UPDATE … SET session_token_consumed_at = now() WHERE
+  session_token_hash = $1 AND session_token_consumed_at IS NULL AND
+  session_token_expires_at > now() RETURNING …`. If no row is returned, a
+  follow-up read decides the `reason`.
+- **Client-facing failure:** on any 403, Voice Service closes the
+  WebSocket with code 1008 (Policy Violation, RFC 6455) and one generic
+  message. The specific `reason` is logged by Voice, not shown to the
+  client.
+
+**Why:**
+- **Single-use is the deciding property.** A stored token can be marked
+  consumed in the same statement that validates it, so a replayed or
+  leaked token fails. A signed self-contained token (option B) cannot be
+  single-use without the server recording used tokens — reintroducing
+  exactly the state B was meant to avoid.
+- **Core API stays the authority** over interviews and session admission,
+  consistent with decision 021: Voice never reads Core API's tables, and
+  learns `interview_id`, `user_id`, `repository_id` from the consume
+  response rather than from claims it must trust.
+- **The network cost is off the turn path.** Consumption happens once per
+  session, at connect; turns never call Core API (decision 006's budget
+  is unaffected).
+- **SHA-256, not bcrypt:** the token has 256 bits of randomness, so a fast
+  hash cannot be brute-forced. A deterministic hash also allows lookup
+  by hash; a salted slow hash would not.
+- **Race-free by construction:** two simultaneous consume attempts cannot
+  both match `consumed_at IS NULL`; the database guarantees only one
+  succeeds.
+
+**Alternatives considered:**
+- **Signed self-contained token (HMAC/JWT).** No Core API hop at connect,
+  but cannot be single-use or revoked before expiry without server-side
+  state. Rejected.
+- **Reuse the Core API session cookie on the WebSocket.** Requires both
+  services on one site, couples them through the cookie, and exposes the
+  WebSocket to cross-site WebSocket hijacking. Rejected.
+- **Separate tokens table.** Supports many tokens per interview, which only
+  matters with reconnect/resumption — out of scope (decision 008).
+  Rejected for now.
+
+**Tradeoff:**
+- Voice Service cannot admit a session while Core API is down. Accepted:
+  admission is an authentication boundary, and the cost is paid once per
+  interview.
+- A network blip ends the interview; the user must start a new one.
+- Revoking a token affects only connections not yet made — an active
+  session is not cut off. Acceptable because sessions are short and
+  single-use tokens cannot be reused afterwards.
+- Distinct 403 reasons give a caller holding the HMAC secret a way to
+  learn whether a token exists. Acceptable: only internal services hold
+  the secret, and clients only ever see the generic close.
+
+**HMAC note (decision 027 revisit trigger):**
+Voice Service is the third internal caller, which is decision 027's
+revisit trigger. Decision: keep one shared secret for now — all services
+run in one trust boundary on one Docker network, and per-caller identity
+would not change any authorization decision we currently make. Revisit
+when services are deployed across separate networks or hosts, or when an
+endpoint should accept some internal callers but not others.
+
+**Consequences:**
+- Voice Service closes any connection that does not send `session.start`
+  within a short timeout (recommendation: 10 s), so unauthenticated
+  sockets cannot sit open.
+- `architecture.md` must be updated: interviews columns, the new internal
+  endpoint, and the `session.start` token transport.
+
+**Revisit when:**
+- Live session resumption is adopted (decision 008) — tokens would need
+  to allow reconnection, likely via a separate tokens table.
+- Users fail to connect within 5 minutes in practice — tune expiry.
+- Core API availability at connect time becomes a measured problem.
+
+---
+
+## 036 — Interview lifecycle: four states, end-of-session reported via event callback
+
+**Decision:**
+Core API owns the `interviews` table and its `status`. States:
+
+    created ──(token consumed)──▶ active ──▶ completed
+                                     └─────▶ interrupted
+
+- `created` — written by `POST /v1/interviews`.
+- `active` — written by `POST /internal/v1/session-tokens/consume`, in the
+  same `UPDATE` that consumes the token (decision 035). The consume time
+  doubles as the session start time; there is no separate `started_at`.
+- `completed` / `interrupted` — terminal. Written by Core API on receiving
+  an event from Voice Service. `interrupted` covers every early ending
+  (disconnect, provider error, crash detected by Voice); `error_message`
+  is set when an error caused it. Both lead to a report — full or partial
+  (decision 008).
+
+Strict transitions: only `created → active` and `active → completed |
+interrupted`. Any other transition is rejected with 422.
+
+Table:
+
+    interviews
+      id                         PK
+      owner_user_id              FK users.id, ON DELETE CASCADE, indexed
+      repository_id              FK repositories.id, indexed
+      status                     String(32) + StrEnum (as repositories)
+      error_message              nullable
+      session_token_hash         unique
+      session_token_expires_at
+      session_token_consumed_at  nullable
+      created_at, updated_at
+      ended_at                   nullable
+
+Voice Service reports the end of a session the same way Repository
+Service reports ingestion (decision 029):
+
+    POST /internal/v1/interviews/{interview_id}/events   (HMAC-signed)
+    body: {
+      event_id:    <uuid v4>,
+      event_type:  "interview.completed" | "interview.interrupted",
+      occurred_at: <ISO 8601, UTC>,
+      data:        { error_message?: string }
+    }
+    → 202 Accepted   → 401 bad signature
+    → 404 unknown interview   → 422 illegal transition
+
+No retry, no `event_id` deduplication — as in decision 029.
+
+**Why:**
+- Every stored state has a writer. States without one were dropped:
+  `expired` (nothing runs at expiry time — derived instead: a `created`
+  interview past `session_token_expires_at`), and `cancelled` (no
+  requirement asks for it).
+- `failed` was replaced by `interrupted`: under decision 008, an early
+  ending produces a partial report whatever caused it, so "finished vs.
+  ended early" is the distinction that matters downstream.
+- Strict rather than loose transitions (unlike decision 029): there are
+  only two events per interview, `active` is set inside Core API itself,
+  so the out-of-order race that motivated the loose ingestion machine
+  cannot occur here.
+- Reusing decision 029's event envelope gives the codebase one pattern
+  for "service reports a state change to its owner", and keeps `event_id`
+  in the wire format so dedup can be added later without changing senders.
+
+**Tradeoff:**
+- **Stuck `active` interviews.** If Voice Service crashes or restarts
+  mid-session, no end event is sent — and retries would not help, since
+  the sender is gone. The interview stays `active` and receives no
+  report. This will happen routinely during development (every Voice
+  restart). Accepted because no data is lost: turns are persisted as they
+  complete (decision 008), so a stuck interview can be ended and reported
+  on later.
+- A dropped event (rare, same network) has the same effect.
+
+**Revisit when:**
+- Stuck `active` interviews appear outside development, or a user misses
+  a report because of one. Likely fix: Core API treats an `active`
+  interview older than a maximum interview length as `interrupted`
+  (lazily on read, or via a periodic sweep) and triggers its report.
+- Voice Service is deployed in a way that restarts it during user
+  sessions (rolling deploys, autoscaling).
+- Dedup becomes necessary per decision 029's triggers.
+---
+
+## 037 — Core API's Alembic manages only Core API's tables
+
+**Decision:**
+`core-api/migrations/env.py` passes an `include_object` hook to both
+`context.configure()` calls (offline and online). The hook excludes any
+table that exists in the database but has no Core API model
+(`type_ == "table" and reflected and compare_to is None`), so
+autogenerate never proposes creating, altering, or dropping another
+service's tables.
+
+**Why:**
+Generating the interviews migration (decision 036), autogenerate emitted
+`op.drop_table('code_chunks')` alongside the new table. Autogenerate
+compares the live database against `Base.metadata`, which only knows Core
+API's models. `code_chunks` is owned by Repository Service (decision 031)
+but lives in the same database and the same `public` schema, so to
+Alembic it looked like a table whose model had been deleted. Applying
+that migration would have dropped every chunk and embedding of every
+ingested repository. It was caught only by reading the generated file
+before applying it.
+
+Decision 021's ownership rule ("no service reads or writes another
+service's tables") was followed by Core API's application code but not
+by its migration tooling. Deleting the line by hand would fix one
+migration; every future autogenerate would propose it again. The hook
+encodes the ownership rule where the tooling can enforce it.
+
+**Alternatives considered:**
+- **Delete the line by hand in each migration.** Rejected: relies on a
+  human catching it every time; one miss destroys another service's data.
+- **Allowlist Core API's tables by name in the hook.** Explicit, but must
+  be updated for every new table — forgetting would silently skip a new
+  Core API table from autogenerate. Rejected in favour of deriving
+  ownership from the models themselves.
+- **Move Repository Service into its own Postgres schema** (the
+  per-service-schema model stated in `architecture.md`), and scope Core
+  API's autogenerate to its schema. The structural fix, but a larger
+  change touching Repository Service's DDL and queries (decision 031's
+  revisit item). Deferred.
+
+**Tradeoff:**
+- If Core API intentionally removes one of its own models, autogenerate
+  will no longer emit the `drop_table` — it must be written by hand.
+  Accepted: a missing drop is harmless and visible; a wrong drop
+  destroys data.
+- The hook protects only against autogenerate. A hand-written migration
+  can still touch another service's tables; that remains a review rule,
+  not an enforced one.
+
+**Note — unrelated drift found at the same time:**
+Autogenerate also proposed dropping `ix_users_github_user_id`. The users
+migration created both an unnamed unique constraint and a redundant
+unique index on `github_user_id`; the model now declares only the
+constraint. Uniqueness is unaffected either way. Deliberately left out of
+the interviews migration (one migration, one change) and deferred to its
+own cleanup migration alongside the naming-convention item in
+`architecture.md`.
+
+**Revisit when:**
+- Repository Service moves `code_chunks` into its own Postgres schema
+  (decision 031's revisit trigger) — Core API's autogenerate can then be
+  scoped by schema, and this hook becomes redundant.
+- Another service adopts Alembic against the same database — it needs the
+  same hook, or the same incident repeats in the other direction.
