@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Shared HMAC secret for signing internal service-to-service calls.
     # Must match repository-service's INTERNAL_HMAC_SECRET.
     internal_hmac_secret: str
+    # How long a newly issued interview session token stays valid if
+    # unused (decision 035). An interview rule, so it lives in config,
+    # not in security/session_tokens.py.
+    session_token_ttl_minutes: int = 5
 
 
 @lru_cache

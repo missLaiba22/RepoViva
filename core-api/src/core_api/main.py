@@ -7,6 +7,7 @@ from core_api.db import get_db
 from core_api.internal.router import router as internal_router
 from core_api.users.router import router as users_router
 from core_api.repositories.router import router as repositories_router
+from core_api.interviews.router import router as interviews_router
 
 
 
@@ -16,7 +17,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(repositories_router)
 app.include_router(internal_router)
-
+app.include_router(interviews_router)
 
 @app.get("/health")
 def health() -> dict[str, str]:
