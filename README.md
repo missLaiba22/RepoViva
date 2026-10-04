@@ -1,50 +1,50 @@
 # RepoViva
 
-## What is RepoViva?
+A voice-based interview coach for developers. Connect a GitHub repository, and RepoViva studies the actual code, then runs a spoken mock interview grounded in that code — asking questions, following up on your answers, and producing a feedback report at the end.
 
-RepoViva is a voice-based interview coach for developers. A user connects a GitHub repository, RepoViva studies the actual code in the project, and then conducts a realistic technical interview based on that code.
+## Why
 
-It asks questions, listens to spoken answers, can ask follow-up questions, evaluates the answers, and produces a report at the end.
+Developers prepare with generic interview questions but often struggle to explain and defend the projects they actually built. RepoViva lets you practise talking about your own code.
 
-## Problem
+## Architecture
 
-Developers often prepare for technical interviews using generic questions, but they may struggle to explain and defend the projects they have actually built.
+Four Python microservices in a monorepo, sharing one PostgreSQL + pgvector database (each service owns its own tables). Internal calls are HMAC-signed HTTP.
 
-RepoViva helps developers practise discussing their own code before a real interview.
+| Service | Role | Status |
+|---|---|---|
+| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report metadata | Auth, repositories, interview creation implemented |
+| [repository-service](repository-service/) | Clone, chunk, embed and retrieve repository code | Ingestion and retrieval implemented |
+| [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Not started |
+| evaluation-service | Generates the end-of-interview report | Not started |
+| frontend | React + Vite + TypeScript SPA | Not started |
 
-## How it works
+Details: [docs/architecture.md](docs/architecture.md). The reasoning behind every choice: [docs/decisions.md](docs/decisions.md).
 
-1. User connects a GitHub repository.
-2. RepoViva fetches and analyzes the repository.
-3. The system builds a code-aware representation that can be used to retrieve relevant parts of the project.
-4. User starts a mock interview.
-5. RepoViva asks questions grounded in the user's actual project.
-6. User answers using voice.
-7. RepoViva can ask follow-up questions based on the conversation and code.
-8. The system evaluates the answers.
-9. User receives a report with feedback.
+## Tech stack
 
-## MVP
+- **Backend:** Python 3.11+, FastAPI, `uv`, pytest, ruff
+- **Database:** PostgreSQL 16 + pgvector (Docker Compose locally)
+- **Ingestion:** CocoIndex (syntax-aware chunking), Voyage `voyage-4-lite` embeddings
+- **Frontend:** React + Vite + TypeScript (planned)
+- **STT / TTS / LLM providers:** not chosen yet
 
-* Connect a GitHub repository.
-* Fetch and process repository code.
-* Analyze the project's structure and code.
-* Retrieve relevant code for interview questions.
-* Conduct a code-aware mock interview.
-* Support spoken questions and answers.
-* Evaluate interview answers.
-* Generate an interview report.
+## Running locally
 
-## Tech Stack
+Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), Docker, Git.
 
-* Frontend: React
-* Backend: FastApi
-* Database: TBD
-* AI / LLM: TBD
-* Code analysis / retrieval: TBD
-* Voice: TBD
-* Infrastructure: TBD
+```bash
+# 1. Start Postgres (pgvector)
+docker compose up -d
 
-## Project Status
+# 2. Start each service — see its README for .env setup
+cd core-api && uv sync && uv run alembic upgrade head && uv run uvicorn core_api.main:app --reload --port 8000
+cd repository-service && uv sync && uv run uvicorn repository_service.main:app --reload --port 8001
+```
 
-Currently in the planning and architecture phase.
+Both services must share the same `INTERNAL_HMAC_SECRET`.
+
+## Project status
+
+Working end to end: GitHub login → submit a repository → background ingestion (clone, chunk, embed) with status callbacks → retrieval over the indexed code → create an interview and receive a single-use session token.
+
+Next: Voice Service (live session, token consumption, question generation), then Evaluation Service and the frontend.
