@@ -10,6 +10,44 @@ Developers prepare with generic interview questions but often struggle to explai
 
 Four Python microservices in a monorepo, sharing one PostgreSQL + pgvector database (each service owns its own tables). Internal calls are HMAC-signed HTTP.
 
+```mermaid
+flowchart LR
+    FE[Browser<br/>React SPA planned]
+
+    subgraph Built
+        CORE[Core API<br/>auth · repos · interviews]
+        REPO[Repository Service<br/>ingest · retrieve]
+    end
+
+    subgraph Planned
+        VOICE[Voice Service<br/>live interview]
+        EVAL[Evaluation Service<br/>reports]
+    end
+
+    DB[(PostgreSQL<br/>+ pgvector)]
+    GH[GitHub]
+    VOY[Voyage AI<br/>embeddings]
+    AI[STT · LLM · TTS<br/>providers TBD]
+
+    FE -- REST --> CORE
+    FE -. WebSocket .-> VOICE
+    CORE -- OAuth --> GH
+    CORE -- ingest trigger --> REPO
+    REPO -- status events --> CORE
+    REPO -- clone --> GH
+    REPO -- embed --> VOY
+    VOICE -. consume token · lifecycle events .-> CORE
+    VOICE -. retrieve code .-> REPO
+    VOICE -.-> AI
+    EVAL -.-> AI
+    CORE --> DB
+    REPO --> DB
+    VOICE -.-> DB
+    EVAL -.-> DB
+```
+
+*Solid lines are implemented; dashed lines are planned.*
+
 | Service | Role | Status |
 |---|---|---|
 | [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report metadata | Auth, repositories, interview creation implemented |
