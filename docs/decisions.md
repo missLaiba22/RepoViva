@@ -1394,3 +1394,218 @@ own cleanup migration alongside the naming-convention item in
   scoped by schema, and this hook becomes redundant.
 - Another service adopts Alembic against the same database — it needs the
   same hook, or the same incident repeats in the other direction.
+
+---
+
+## 038 — LLM provider for question generation: Groq
+
+**Decision:**
+Voice Service generates interview questions with Groq's
+`llama-3.3-70b-versatile`, called through `litellm` (model string
+`groq/llama-3.3-70b-versatile`). The model name lives in config
+(`LLM_MODEL`), so it can change without a code change.
+
+**Why:**
+- **Cost:** Groq's free tier covers development and demos with no spend.
+- **Latency:** Groq serves open models with very high throughput. A short
+  question finishes in well under a second, which leaves room in the
+  4–5 s turn budget (decision 006) for retrieval and, later, STT and TTS.
+- **Portability:** `litellm` is already a Repository Service dependency.
+  Going through it keeps the provider a config value, not an SDK baked
+  into the session code.
+
+**Alternatives considered:**
+- **Claude or OpenAI models:** stronger question quality, but paid from
+  the first request. They stay one config change away.
+- **A local model (Ollama):** free and private, but too slow on
+  development hardware for the turn budget.
+
+**Tradeoff:**
+- Free-tier rate limits (requests and tokens per minute and per day) can
+  reject requests during heavy testing. Each interview makes roughly one
+  LLM call per question, so ~10 concurrent interviews is within range,
+  but long prompts that carry many chunks eat the token allowance quickly.
+- An open 70B model may phrase questions less sharply than a frontier
+  model. That's acceptable while the loop itself is being built.
+
+**Revisit when:**
+- Rate-limit errors show up in normal use (not just load tests).
+- Question quality, judged on real interviews, is the weakest part of
+  the product.
+- The deployment moves past free-tier usage.
+
+---
+
+## 039 — First Voice Service slice is text-only; WebSocket protocol v1
+
+**Decision:**
+The first Voice Service slice runs the whole interview loop with text in
+and text out. The client sends its answer as text (`answer.text`), and
+the server sends questions as text (`question.text`). STT and TTS are
+added in the next slice, behind the same loop, once those providers are
+chosen.
+
+Protocol v1 (JSON text frames, each `{ "type": ..., ...fields }`):
+
+    Client → Server
+      session.start  { token }
+      answer.text    { text }        // stand-in for audio.chunk/audio.end
+      session.end    {}
+
+    Server → Client
+      session.ready  { interview_id }
+      question.text  { turn_id, seq, text }
+      turn.complete  { turn_id }
+      session.end    { reason: "completed" | "ended_by_client" }
+      error          { code, message }
+
+Endpoint: `/v1/ws/interview` on Voice Service. The token travels only in
+`session.start` (decision 035). A socket that doesn't send
+`session.start` within 10 s, or whose token is rejected, is closed with
+code 1008.
+
+**Why:**
+- The parts that make RepoViva different are retrieval, grounding and
+  prompting (decision 013). A text loop lets them be built, tested and
+  tuned without audio plumbing and without paying for STT or TTS.
+- Decision 003 (voice-only) still applies to the product. Text mode is a
+  development stage, not a user-facing modality.
+- Every message except `answer.text` is final, so the frontend and the
+  audio slice build on this protocol instead of replacing it.
+
+**Tradeoff:**
+- Text answers are cleaner than transcripts. Prompts tuned on typed
+  answers may need adjusting for STT output (filler words, misheard
+  identifiers).
+- Latency measured in this slice leaves out STT and TTS, so it
+  understates the real turn time.
+
+**Revisit when:**
+- The audio slice starts: `answer.text` is then replaced by `audio.chunk`
+  and `audio.end`, and `question.audio_chunk` is added.
+- Accessibility needs a permanent text fallback (decision 003's revisit
+  trigger).
+
+---
+
+## 040 — `turns` table, owned by Voice Service
+
+**Decision:**
+Voice Service owns a `turns` table (decision 010's single-Turn shape). Its
+DDL lives in `voice-service/sql/schema.sql` and is applied idempotently
+at startup, the same way as Repository Service (decision 031).
+
+    turns
+      id                   BIGSERIAL PK
+      interview_id         BIGINT NOT NULL, indexed   -- no FK
+      seq                  INT NOT NULL               -- 1-based within interview
+      question_text        TEXT NOT NULL
+      retrieved_chunk_ids  BIGINT[] NOT NULL
+      answer_text          TEXT NULL
+      status               TEXT NOT NULL              -- 'asked' | 'answered'
+      timings              JSONB NOT NULL             -- per-stage ms
+      created_at           TIMESTAMPTZ DEFAULT now()
+      answered_at          TIMESTAMPTZ NULL
+      UNIQUE (interview_id, seq)
+
+A turn is inserted as `asked` when its question is sent, and updated to
+`answered` when the answer arrives.
+
+**Why:**
+- **No foreign key to `interviews`:** decision 021 says no service touches
+  another's tables. An FK would make Voice Service's schema depend on Core
+  API's migrations and table names. Integrity comes from the fact that
+  Voice Service only learns an `interview_id` from a successful token
+  consume.
+- **`retrieved_chunk_ids`** makes coverage and repetition measurable and
+  feeds `exclude_chunk_ids` (decision 034's consequence).
+- **`timings`** covers decision 034's per-stage timing requirement
+  without a separate metrics table.
+- **Persisting the question before the answer** means an interrupted
+  interview still records what was asked. That's the material for the
+  partial report (decision 008).
+
+**Tradeoff:**
+- Deleting an interview won't cascade to its turns. That belongs to the
+  cross-service deletion flow already listed under Future Evolution in
+  `architecture.md`.
+- The table sits in `public` alongside `code_chunks`. Core API's Alembic
+  ignores it because of decision 037's hook.
+
+**Revisit when:**
+- Questions and answers get separate lifecycles (decision 010).
+- The per-service-schema split happens (decision 031).
+
+---
+
+## 041 — How an interview ends
+
+**Decision:**
+An interview ends in one of three ways:
+1. **Question budget reached.** After the answer to question N
+   (`MAX_QUESTIONS`, default 6), Voice Service sends
+   `interview.completed` to Core API.
+2. **The client sends `session.end`.** This also counts as
+   `interview.completed`, because the user chose to stop.
+3. **The socket drops or the session fails** (provider error, crash
+   caught in the runner). Voice Service sends `interview.interrupted`
+   with an `error_message`.
+
+The end event goes to Core API's `POST /internal/v1/interviews/{id}/events`
+(decision 036).
+
+**Why:**
+- A fixed budget keeps sessions short and predictable, both for users and
+  for the free-tier LLM allowance (decision 038).
+- A user who stops on purpose has finished their interview. Calling it
+  "interrupted" would mislabel it, and both outcomes get a report anyway
+  (decision 008).
+- Whether a turn was answered is already recorded in `turns.status`, so
+  the event doesn't need to carry it.
+
+**Tradeoff:**
+- A fixed count ignores how well the interview is going. An adaptive
+  ending (stop once coverage is good enough) is deferred.
+- A Voice Service crash still leaves the interview stuck in `active`,
+  as decision 036 already accepts.
+
+**Revisit when:**
+- Users find 6 questions too few or too many.
+- A topic plan (decision 034's hybrid option) makes coverage-based
+  endings possible.
+
+---
+
+## 042 — Retrieval queries for opening and follow-up questions
+
+**Decision:**
+- **Opening question:** retrieve with a fixed seed query: "application
+  entry point, core architecture, main modules and how they connect".
+- **Later questions:** query with the previous question plus the
+  candidate's answer.
+- **Every retrieval** passes `exclude_chunk_ids` set to all chunk IDs
+  already used in the interview (from `turns.retrieved_chunk_ids`), with
+  `top_k = 6`.
+
+**Why:**
+- Before the candidate says anything there's no query text. A seed
+  aimed at architecture gives the opening question about the most
+  central code, which is also how a human interviewer starts.
+- Querying with the question plus the answer keeps the follow-up
+  grounded in what the candidate actually talked about. That's the
+  "relevant follow-up" requirement.
+- Excluding used chunks is decision 034's tool against repeated
+  questions, now applied.
+- `top_k = 6` keeps the prompt small for the free-tier token allowance
+  (decision 038) while giving the model enough context.
+
+**Tradeoff:**
+- Every interview on the same repository opens about the same code.
+  Decision 002 (repeat practice) argues for variety. A cheap later fix is
+  to rotate between several seed queries.
+- Exclusion can push later questions toward less central code. That's
+  acceptable within a 6-question budget.
+
+**Revisit when:**
+- Users repeating interviews notice the same opening question.
+- Decision 034's coverage triggers fire.
