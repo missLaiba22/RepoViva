@@ -7,11 +7,17 @@ with 401.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from core_api.config import get_settings
 from core_api.db import get_db
-from core_api.internal.schemas import IngestionEventBody
+from core_api.interviews import service as interviews_service
+from core_api.internal.schemas import (
+    IngestionEventBody,
+    SessionTokenConsumeBody,
+    SessionTokenConsumeResponse,
+)
 from core_api.repositories import service as repositories_service
 from core_api.repositories.service import IllegalTransitionError
 from core_api.security.hmac_auth import (
@@ -96,3 +102,34 @@ def receive_ingestion_event(
         )
 
     return {"status": "accepted", "repository_id": str(repository_id)}
+
+
+@router.post(
+    "/session-tokens/consume",
+    response_model=SessionTokenConsumeResponse,
+    dependencies=[Depends(verify_hmac)],
+    responses={
+        401: {"description": "Missing or invalid HMAC signature"},
+        403: {"description": "Token unknown, expired, or already consumed"},
+    },
+)
+def consume_session_token(
+    body: SessionTokenConsumeBody,
+    db: Session = Depends(get_db),
+) -> SessionTokenConsumeResponse | JSONResponse:
+    """Exchange a one-time session token for the interview it belongs to.
+
+    Called once per session by Voice Service on `session.start`. Not
+    idempotent — a second call with the same token gets 403 `consumed`.
+    """
+    try:
+        consumed = interviews_service.consume_session_token(db, raw_token=body.token)
+    except interviews_service.TokenRejectedError as exc:
+        # JSONResponse, not HTTPException: HTTPException would wrap the
+        # body as {"detail": ...}, but decision 035's contract is {reason}.
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"reason": exc.reason},
+        )
+
+    return SessionTokenConsumeResponse(**consumed._asdict())

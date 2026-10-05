@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 EventType = Literal[
     "ingestion.started",
@@ -29,3 +29,19 @@ class IngestionEventBody(BaseModel):
     event_type: EventType
     occurred_at: datetime
     data: dict[str, Any] | None = None
+
+
+class SessionTokenConsumeBody(BaseModel):
+    """Body of POST /internal/v1/session-tokens/consume (decision 035)."""
+
+    # token_urlsafe(32) is 43 chars. The cap stops a caller making us
+    # hash arbitrarily large input; 128 leaves room if the format grows.
+    token: str = Field(min_length=1, max_length=128)
+
+
+class SessionTokenConsumeResponse(BaseModel):
+    """200 response: what Voice Service needs to run the session."""
+
+    interview_id: int
+    user_id: int
+    repository_id: int
