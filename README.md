@@ -17,32 +17,34 @@ flowchart LR
     subgraph Built
         CORE[Core API<br/>auth · repos · interviews]
         REPO[Repository Service<br/>ingest · retrieve]
+        VOICE[Voice Service<br/>interview loop · text mode]
     end
 
     subgraph Planned
-        VOICE[Voice Service<br/>live interview]
         EVAL[Evaluation Service<br/>reports]
     end
 
     DB[(PostgreSQL<br/>+ pgvector)]
     GH[GitHub]
     VOY[Voyage AI<br/>embeddings]
-    AI[STT · LLM · TTS<br/>providers TBD]
+    LLM[Groq<br/>question LLM]
+    AI[STT · TTS<br/>providers TBD]
 
     FE -- REST --> CORE
-    FE -. WebSocket .-> VOICE
+    FE -- WebSocket --> VOICE
     CORE -- OAuth --> GH
     CORE -- ingest trigger --> REPO
     REPO -- status events --> CORE
     REPO -- clone --> GH
     REPO -- embed --> VOY
-    VOICE -. consume token · lifecycle events .-> CORE
-    VOICE -. retrieve code .-> REPO
+    VOICE -- consume token · lifecycle events --> CORE
+    VOICE -- retrieve code --> REPO
+    VOICE -- questions --> LLM
     VOICE -.-> AI
     EVAL -.-> AI
     CORE --> DB
     REPO --> DB
-    VOICE -.-> DB
+    VOICE --> DB
     EVAL -.-> DB
 ```
 
@@ -50,9 +52,9 @@ flowchart LR
 
 | Service | Role | Status |
 |---|---|---|
-| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report metadata | Auth, repositories, interview creation and session-token consumption implemented |
+| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report metadata | Auth, repositories, interviews (create, list, get), session-token consumption and lifecycle events implemented |
 | [repository-service](repository-service/) | Clone, chunk, embed and retrieve repository code | Ingestion and retrieval implemented |
-| [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Not started |
+| [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Interview loop implemented in text mode; STT/TTS next |
 | evaluation-service | Generates the end-of-interview report | Not started |
 | frontend | React + Vite + TypeScript SPA | Not started |
 
@@ -64,7 +66,8 @@ Details: [docs/architecture.md](docs/architecture.md). The reasoning behind ever
 - **Database:** PostgreSQL 16 + pgvector (Docker Compose locally)
 - **Ingestion:** CocoIndex (syntax-aware chunking), Voyage `voyage-4-lite` embeddings
 - **Frontend:** React + Vite + TypeScript (planned)
-- **STT / TTS / LLM providers:** not chosen yet
+- **Interview LLM:** Groq `llama-3.3-70b-versatile` via litellm (decision 038)
+- **STT / TTS providers:** not chosen yet
 
 ## Running locally
 
@@ -77,12 +80,15 @@ docker compose up -d
 # 2. Start each service — see its README for .env setup
 cd core-api && uv sync && uv run alembic upgrade head && uv run uvicorn core_api.main:app --reload --port 8000
 cd repository-service && uv sync && uv run uvicorn repository_service.main:app --reload --port 8001
+cd voice-service && uv sync && uv run uvicorn voice_service.main:app --reload --port 8002
 ```
 
-Both services must share the same `INTERNAL_HMAC_SECRET`.
+All services must share the same `INTERNAL_HMAC_SECRET`.
 
 ## Project status
 
-Working end to end: GitHub login → submit a repository → background ingestion (clone, chunk, embed) with status callbacks → retrieval over the indexed code → create an interview and receive a single-use session token → exchange that token through Core API's internal consume endpoint, which starts the interview.
+Working end to end: GitHub login → submit a repository → background ingestion (clone, chunk, embed) with status callbacks → retrieval over the indexed code → create an interview and receive a single-use session token → the token is consumed through Core API, which starts the interview.
 
-Next: Voice Service (live session and question generation, consuming the token at connect), then Evaluation Service and the frontend.
+Implemented, tested with fakes, live run pending: the text-mode interview in Voice Service. It covers WebSocket admission with the token, code-grounded questions from Groq, persisted turns, and completed/interrupted reported back to Core API. Try it with `voice-service/scripts/interview_cli.py`.
+
+Next: STT/TTS for the audio slice, then Evaluation Service and the frontend.

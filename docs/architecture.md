@@ -2,7 +2,7 @@
 
 ## Overview
 
-RepoViva is built as **4 microservices** communicating over HTTP (and WebSocket for the interview session). Requirements, core entities, service split, and key architectural constraints have been decided. Specific external providers (STT, TTS, LLM) and the full data model are still open.
+RepoViva is built as **4 microservices** communicating over HTTP (and WebSocket for the interview session). Requirements, core entities, service split, and key architectural constraints have been decided. The LLM provider for interview questions is chosen (Groq, decision 038). STT and TTS providers and the full data model are still open.
 
 This document is the source of truth for the current architecture. See `decisions.md` for the reasoning behind each choice.
 
@@ -25,7 +25,7 @@ flowchart TB
 
     subgraph "External Providers"
         GH[GitHub<br/>OAuth + Repos]
-        LLM[LLM Provider<br/>TBD]
+        LLM[LLM Provider<br/>Groq for questions]
         STT[STT Provider<br/>TBD]
         TTS[TTS Provider<br/>TBD]
     end
@@ -34,9 +34,10 @@ flowchart TB
     FE -- WebSocket --> VOICE
 
     CORE -- trigger ingest --> REPO
-    REPO -. status callback<br/>(deferred, see decision 028) .-> CORE
-    CORE -- trigger report --> EVAL
+    REPO -- status callback --> CORE
+    CORE -. trigger report .-> EVAL
     VOICE -- retrieval query --> REPO
+    VOICE -- consume token<br/>end-of-session event --> CORE
 
     CORE --> DB
     REPO --> DB
@@ -45,14 +46,14 @@ flowchart TB
 
     CORE -- OAuth --> GH
     REPO -- fetch repo --> GH
-    REPO -- embeddings --> LLM
-    VOICE -- transcribe --> STT
+    REPO -- embeddings (Voyage) --> LLM
+    VOICE -. transcribe .-> STT
     VOICE -- generate --> LLM
-    VOICE -- synthesize --> TTS
-    EVAL -- generate --> LLM
+    VOICE -. synthesize .-> TTS
+    EVAL -. generate .-> LLM
 ```
 
-*The status-callback arrow is dashed to signal that this direction is designed but not implemented — see decision 028.*
+*Dashed arrows are designed but not yet implemented: report generation (Evaluation Service) and the audio stages of the Voice Service (STT/TTS — the current slice is text-only, decision 039).*
 
 ## Components
 
@@ -80,7 +81,7 @@ Owns everything about a repository's code and its searchable representation:
 - Parses, chunks, and embeds source code
 - Persists chunks + embeddings (pgvector) to the shared database
 - Exposes a retrieval endpoint used by Voice Service during interviews
-- (Planned, see decision 028) Reports ingestion progress to Core API via authenticated callbacks
+- Reports ingestion progress to Core API via HMAC-signed callbacks (decision 029)
 
 Runs ingestion asynchronously (long-running work; must not block API requests). See "Data Flow" below.
 
@@ -88,10 +89,10 @@ Runs ingestion asynchronously (long-running work; must not block API requests). 
 
 Owns the live interview session:
 
-- Terminates the WebSocket from the frontend
-- Runs the STT → Repository Service lookup → LLM → TTS pipeline for each turn
-- Persists each turn as it completes (question + transcribed answer)
-- Handles session interruption gracefully (partial report is possible because turns are already persisted)
+- Terminates the WebSocket from the frontend and admits it by consuming the session token through Core API (decision 035)
+- Runs the Repository Service lookup → LLM step for each turn. STT and TTS wrap this loop in the audio slice; the current slice is text in, text out (decision 039)
+- Persists each turn in its own `turns` table: the question when it's asked, the answer when it arrives (decision 040)
+- Reports the end of each session to Core API as `completed` or `interrupted` (decision 041). An interruption still leaves a partial record because turns are already persisted
 
 ### Evaluation Service
 
@@ -140,8 +141,8 @@ Interviews
 POST /v1/interviews              body: { repository_id }  → Interview + session token   [implemented]
                                  201; 404 if repo missing or not yours; 409 if repo not `ready`
                                  The raw token appears ONLY in this response (decision 035)
-GET  /v1/interviews              list current user's interviews                          [planned]
-GET  /v1/interviews/{id}         single interview                                        [planned]
+GET  /v1/interviews              list current user's interviews, newest first            [implemented]
+GET  /v1/interviews/{id}         single interview; 404 if missing or not yours           [implemented]
 GET  /v1/interviews/{id}/report  the report                                              [planned]
 ```
 
@@ -230,7 +231,7 @@ interview to `active` (decision 036), so concurrent calls with the same
 token can't both succeed. The endpoint is not idempotent: a second call
 gets 403 `consumed`. Implementation notes are under decision 035.
 
-**Planned (decision 036):**
+**Implemented (decisions 036, 041):**
 
 Voice Service → Core API (end of session)
 ```
@@ -239,6 +240,12 @@ body: { event_id, event_type: "interview.completed" | "interview.interrupted",
         occurred_at, data: { error_message? } }
 → 202  → 401  → 404  → 422 (illegal transition)
 ```
+Strict transitions: only an `active` interview can end, so a repeated end
+event gets 422. Sets `ended_at`, plus `error_message` (truncated to 1000
+characters) on `interrupted`. Voice Service sends it best-effort, with no
+retry, like ingestion events.
+
+**Planned:**
 
 Core API → Evaluation Service (report generation)
 ```
@@ -250,21 +257,32 @@ Generates a report for a completed (or partial) interview. Detailed shape TBD.
 
 Interview turns are not REST. Once an interview is created by Core API, the client connects a WebSocket to the Voice Service, presenting the session token issued by Core API.
 
-First-sketch message protocol (to be refined during implementation):
+**Protocol v1 — implemented, text mode (decision 039).** Endpoint
+`ws://<voice-service>/v1/ws/interview`; JSON text frames shaped
+`{ "type": ..., ...fields }`.
 
+```
 Client → Server
-- `session.start` (with interview_id + session token)
-- `audio.chunk` (binary audio frames as user speaks)
-- `audio.end` (optional client-side end-of-speech hint)
+  session.start  { token }          must be the first message, within 10 s
+  answer.text    { text }           1–5000 chars; stand-in for audio until STT lands
+  session.end    {}                 user stops early → counts as completed (decision 041)
 
 Server → Client
-- `session.ready`
-- `transcript.partial` / `transcript.final` (STT results for UI feedback)
-- `question.text` (the question in text form for display / accessibility)
-- `question.audio_chunk` (TTS audio streaming down)
-- `turn.complete` (turn persisted)
-- `session.end`
-- `error`
+  session.ready  { interview_id }
+  question.text  { turn_id, seq, text }
+  turn.complete  { turn_id }        answer persisted
+  session.end    { reason: "completed" | "ended_by_client" }
+  error          { code, message }  e.g. bad_message (socket stays open), internal_error
+```
+
+Close codes: `1000` normal end · `1008` missing, invalid or rejected
+token (one generic reason; the specific 403 reason is only logged,
+decision 035) · `1011` internal failure (Core API unreachable at admission,
+or the session failed mid-way).
+
+**Audio slice (planned):** `answer.text` is replaced by `audio.chunk`
+(binary frames) and `audio.end`. The server adds `transcript.partial` /
+`transcript.final` and `question.audio_chunk`. Everything else stays as in v1.
 
 ## Data Flow
 
@@ -316,11 +334,13 @@ see decision 031 for why that split exists and what it fixed.
 
 1. Client calls `POST /v1/interviews` on Core API (allowed only if repo status is `ready`). Core API creates the interview and returns a session token.
 2. Client opens a WebSocket to Voice Service and sends the session token in its first message, `session.start` — not in the URL, which is commonly logged (decision 035).
-3. Voice Service consumes the token via Core API's `/internal/v1/session-tokens/consume` (once per session; this also moves the interview to `active` and returns its `repository_id`). It then retrieves repo context via Repository Service's `/internal/v1/retrieve`, generates the opening question via the LLM provider (decision 034), and streams TTS audio down.
-4. User speaks. Client streams audio frames up. Voice Service runs STT and VAD on the incoming stream.
-5. On end-of-speech, Voice Service persists the completed turn (question + transcript), then queries Repository Service for context relevant to the user's answer, generates the next question via the LLM, and streams TTS down.
-6. Loop until the interview ends.
-7. On session end, Voice Service reports `interview.completed` or `interview.interrupted` to Core API (decision 036). Which service triggers report generation is decided when Evaluation Service is built.
+3. Voice Service consumes the token via Core API's `/internal/v1/session-tokens/consume`. This happens once per session; it also moves the interview to `active` and returns its `repository_id`. Voice Service then replies `session.ready`.
+4. **Opening turn:** retrieve with the fixed seed query (decision 042) → generate the question with Groq (decisions 034, 038) → insert the turn as `asked` → send `question.text`. Retrieval and LLM times are stored on the turn and logged.
+5. The user answers. Today that's `answer.text`; in the audio slice it becomes audio frames, then STT and VAD. Voice Service records the answer (turn → `answered`) and sends `turn.complete`.
+6. **Follow-up turns:** retrieve with the previous question plus the answer, excluding every chunk already used → generate with the full history → ask. Repeat until `MAX_QUESTIONS` (default 6) or the client sends `session.end`.
+7. On session end, Voice Service reports `interview.completed` (budget reached or user stopped) or `interview.interrupted` (disconnect or error) to Core API (decisions 036, 041). Which service triggers report generation is decided when Evaluation Service is built.
+
+In the audio slice, step 4 also streams TTS audio and step 5 starts from audio frames. The rest of the loop is unchanged.
 
 ## Data Storage
 
@@ -338,7 +358,11 @@ see decision 031 for why that split exists and what it fixed.
     when."* DDL lives in `repository-service/sql/schema.sql`,
     applied idempotently by `db.apply_schema()` at service startup —
     not by CocoIndex, which only writes rows to the table.
-  - Voice Service schema: turns.
+  - Voice Service schema: `turns`, one row per question and answer
+    (decision 040). It records `retrieved_chunk_ids` and per-stage
+    `timings`, and has no foreign key to `interviews`. DDL lives in
+    `voice-service/sql/schema.sql` and is applied at startup. *Also in
+    `public` for now, like `code_chunks`.*
   - Evaluation Service schema: report content.
 - **No raw audio storage** — audio is discarded after transcription.
  
@@ -362,12 +386,14 @@ see decision 031 for why that split exists and what it fixed.
 
 Open decisions that will shape architecture:
 
-- Choice of STT, TTS, and LLM providers
+- Choice of STT and TTS providers (LLM chosen: Groq, decision 038)
+- LLM for Evaluation Service reports (may differ from the question model)
 - Choice of background job system inside Repository Service. Real ingestion (clone → chunk → embed via CocoIndex, decisions 030–031) currently runs on FastAPI `BackgroundTasks`; revisit if concurrency, retries, or observability needs outgrow that.
 - Whether to move off HTTP callbacks (decisions 024–026, 029) to a message broker — decision 029 names the revisit triggers (callback drop rate, event volume growth, a second event consumer)
 - Choice of managed Postgres provider (Supabase or Neon)
 - Full data model (fields per entity, per-service schemas)
-- Final WebSocket message protocol
+- Audio additions to the WebSocket protocol (v1 is implemented in text mode, decision 039)
+- Stuck `active` interviews after a Voice Service crash (decision 036's revisit trigger)
 - Retry semantics for failed ingestions (retry-in-place vs new row)
 - Logout endpoint (deferred — no state to clean up server-side, so it's a cookie-clear + redirect when needed)
 - Whether to migrate from signed cookies to JWTs if the session payload grows
