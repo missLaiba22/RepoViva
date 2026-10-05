@@ -63,7 +63,7 @@ Main REST entry point for the frontend. Owns:
 - GitHub OAuth flow and session management
 - User records
 - Repository metadata (with ingestion status)
-- Interview metadata (creation, listing, session token issuance)
+- Interview metadata (creation, listing, session token issuance and consumption)
 - Report metadata (listing, retrieval — actual generation delegated to Evaluation Service)
 
 Delegates:
@@ -164,43 +164,21 @@ body: { github_url: string }
 **Implemented (slice 3):**
 
 Repository Service → Core API (status callback)
-
-Repository Service → Core API (status callback)
 ```
 POST /internal/v1/repositories/{repository_id}/events
+Headers: X-Repoviva-Timestamp, X-Repoviva-Signature (HMAC-SHA256)
 body: {
   event_id:    <uuid v4>,
   event_type:  "ingestion.started" | "ingestion.completed" | "ingestion.failed",
   occurred_at: <ISO 8601 timestamp, UTC>,
-  data:        { ... }   // shape depends on event_type
+  data:        { error_message?: string, ... }   // shape depends on event_type
 }
-
-Response codes (planned):
-- 202 Accepted — event received and processed
-- 409 Conflict — event_id already seen (safe replay, no side effects)
-- 422 Unprocessable Entity — illegal state transition
-- 401 — missing or invalid HMAC signature
-- 404 — unknown repository_id
+→ 202 Accepted — event received and state transition applied
+→ 401 Unauthorized — missing or invalid HMAC signature
+→ 404 Not Found — unknown repository_id
+→ 422 Unprocessable Entity — illegal state transition (target row is
+  in a terminal state: ready or failed)
 ```
-
-**Planned for later slices:**
-POST /internal/v1/repositories/{repository_id}/events
-Headers: X-Repoviva-Timestamp, X-Repoviva-Signature (HMAC-SHA256)
-body: {
-event_id: <uuid v4>,
-event_type: "ingestion.started" | "ingestion.completed" | "ingestion.failed",
-occurred_at: <ISO 8601 timestamp, UTC>,
-data: { error_message?: string, ... }
-}
-
-Response codes:
-
-202 Accepted — event received and state transition applied
-401 Unauthorized — missing or invalid HMAC signature
-404 Not Found — unknown repository_id
-422 Unprocessable Entity — illegal state transition (target row is
-in a terminal state: ready or failed)
-
 
 Deduplication by event_id is not implemented for MVP — see decision 029.
 
@@ -235,16 +213,24 @@ Nearest chunks are found via pgvector cosine distance (`<=>`) against
 filter, since no re-ingestion path exists yet and an interview session
 references a repository, not a specific commit.
 
-**Planned (decisions 035–036):**
+**Implemented (decision 035):**
 
 Voice Service → Core API (session token consumption, once per session)
 ```
 POST /internal/v1/session-tokens/consume
-body: { token: string }
+body: { token: string }            // 1–128 chars
 → 200 { interview_id, user_id, repository_id }
 → 403 { reason: "unknown" | "expired" | "consumed" }
 → 401 (bad HMAC)  → 422 (malformed body)
 ```
+One conditional `UPDATE` both validates and consumes the token. It
+requires the hash to match, the token to be unconsumed and unexpired,
+and the interview's status to be `created`. The same statement moves the
+interview to `active` (decision 036), so concurrent calls with the same
+token can't both succeed. The endpoint is not idempotent: a second call
+gets 403 `consumed`. Implementation notes are under decision 035.
+
+**Planned (decision 036):**
 
 Voice Service → Core API (end of session)
 ```

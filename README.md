@@ -50,7 +50,7 @@ flowchart LR
 
 | Service | Role | Status |
 |---|---|---|
-| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report metadata | Auth, repositories, interview creation implemented |
+| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report metadata | Auth, repositories, interview creation and session-token consumption implemented |
 | [repository-service](repository-service/) | Clone, chunk, embed and retrieve repository code | Ingestion and retrieval implemented |
 | [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Not started |
 | evaluation-service | Generates the end-of-interview report | Not started |
@@ -83,6 +83,6 @@ Both services must share the same `INTERNAL_HMAC_SECRET`.
 
 ## Project status
 
-Working end to end: GitHub login → submit a repository → background ingestion (clone, chunk, embed) with status callbacks → retrieval over the indexed code → create an interview and receive a single-use session token.
+Working end to end: GitHub login → submit a repository → background ingestion (clone, chunk, embed) with status callbacks → retrieval over the indexed code → create an interview and receive a single-use session token → exchange that token through Core API's internal consume endpoint, which starts the interview.
 
-Next: Voice Service (live session, token consumption, question generation), then Evaluation Service and the frontend.
+Next: Voice Service (live session and question generation, consuming the token at connect), then Evaluation Service and the frontend.

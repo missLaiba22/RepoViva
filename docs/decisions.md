@@ -1212,6 +1212,30 @@ endpoint should accept some internal callers but not others.
 - `architecture.md` must be updated: interviews columns, the new internal
   endpoint, and the `session.start` token transport.
 
+**Note — implementation details (consume endpoint):**
+Four points settled while building `consume_session_token`, none of
+which change the contract above:
+- **The `UPDATE` also requires `status = 'created'`.** That makes the
+  consume statement the only way into `active` (decision 036) and stops
+  a token from reviving an interview that has already ended.
+- **The rejection reason is checked in the order `unknown` → `consumed` →
+  `expired`.** Both columns only ever move one way, and a token can't be
+  consumed after it expires. Checking `consumed` first therefore stays
+  correct even when another request won the race a moment earlier. The
+  classifying read runs in the same transaction as the `UPDATE`, so both
+  use the same `now()`. The only other way for the `UPDATE` to miss is an
+  unused, unexpired token whose interview isn't `created`, which the
+  invariants rule out. If it happens anyway, the service logs an error
+  and answers `unknown`.
+- **Commit before responding 200.** The token is burned as soon as Core
+  API says yes. If anything fails after the commit, the interview is
+  left stuck in `active`, the risk decision 036 already accepts. The
+  token still can never be used twice.
+- **The 403 body is exactly `{ "reason": ... }`.** The endpoint returns a
+  `JSONResponse` because an `HTTPException` would wrap it as `{ "detail": ... }`.
+  `token` is capped at 128 characters (the current format is 43), so a
+  caller can't make Core API hash arbitrarily large input.
+
 **Revisit when:**
 - Live session resumption is adopted (decision 008) — tokens would need
   to allow reconnection, likely via a separate tokens table.
