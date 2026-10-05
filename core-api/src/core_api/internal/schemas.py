@@ -31,6 +31,19 @@ class IngestionEventBody(BaseModel):
     data: dict[str, Any] | None = None
 
 
+class InterviewEventBody(BaseModel):
+    """Body of POST /internal/v1/interviews/{id}/events (decision 036).
+
+    Same envelope as IngestionEventBody, so every "service reports a
+    state change to its owner" call looks alike (decision 029).
+    """
+
+    event_id: UUID
+    event_type: Literal["interview.completed", "interview.interrupted"]
+    occurred_at: datetime
+    data: dict[str, Any] | None = None
+
+
 class SessionTokenConsumeBody(BaseModel):
     """Body of POST /internal/v1/session-tokens/consume (decision 035)."""
 

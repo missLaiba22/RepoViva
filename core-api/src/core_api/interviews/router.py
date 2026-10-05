@@ -63,3 +63,37 @@ def create_interview(
         session_token=result.raw_token,
         session_token_expires_at=result.interview.session_token_expires_at,
     )
+
+
+@router.get("", response_model=list[InterviewResponse])
+def list_interviews(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[InterviewResponse]:
+    """The current user's interviews, newest first. No tokens."""
+    interviews = service.list_interviews_for_user(db, owner_user_id=current_user.id)
+    return [InterviewResponse.model_validate(i) for i in interviews]
+
+
+@router.get(
+    "/{interview_id}",
+    response_model=InterviewResponse,
+    responses={404: {"description": "Interview not found"}},
+)
+def get_interview(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> InterviewResponse:
+    """One of the current user's interviews. 404 if missing or not yours."""
+    interview = service.get_interview_for_user(
+        db,
+        interview_id=interview_id,
+        owner_user_id=current_user.id,
+    )
+    if interview is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interview not found",
+        )
+    return InterviewResponse.model_validate(interview)

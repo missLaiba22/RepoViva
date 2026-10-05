@@ -204,3 +204,101 @@ def _classify_rejection(db: Session, token_hash: str) -> RejectionReason:
         row.status,
     )
     return "unknown"
+
+
+# --- Reads (GET /v1/interviews) ---------------------------------------------
+
+
+def get_interview_for_user(
+    db: Session,
+    *,
+    interview_id: int,
+    owner_user_id: int,
+) -> Interview | None:
+    """Fetch one interview, scoped to its owner.
+
+    None for "doesn't exist" and "not yours" alike — the router answers
+    404 either way, same rule as repositories.
+    """
+    stmt = select(Interview).where(
+        Interview.id == interview_id,
+        Interview.owner_user_id == owner_user_id,
+    )
+    return db.scalars(stmt).one_or_none()
+
+
+def list_interviews_for_user(db: Session, *, owner_user_id: int) -> list[Interview]:
+    """List a user's interviews, newest first."""
+    stmt = (
+        select(Interview)
+        .where(Interview.owner_user_id == owner_user_id)
+        .order_by(Interview.created_at.desc())
+    )
+    return list(db.scalars(stmt))
+
+
+# --- Lifecycle events from Voice Service (decision 036) ---------------------
+
+InterviewEventType = Literal["interview.completed", "interview.interrupted"]
+
+_EVENT_TO_TARGET: dict[str, InterviewStatus] = {
+    "interview.completed": InterviewStatus.COMPLETED,
+    "interview.interrupted": InterviewStatus.INTERRUPTED,
+}
+
+
+class IllegalTransitionError(Exception):
+    """The event doesn't fit the interview's current state. Router answers 422.
+
+    Its own class rather than the repositories one: the two state
+    machines are separate, and a caller catching one must not
+    accidentally swallow the other.
+    """
+
+
+def target_status_for(current: str, event_type: InterviewEventType) -> InterviewStatus:
+    """Strict transitions (decision 036): only `active` may end.
+
+    Pure function so the state machine is testable without a database.
+    """
+    if current != InterviewStatus.ACTIVE.value:
+        raise IllegalTransitionError(
+            f"cannot apply {event_type} to interview in state {current}"
+        )
+    return _EVENT_TO_TARGET[event_type]
+
+
+def apply_interview_event(
+    db: Session,
+    *,
+    interview_id: int,
+    event_type: InterviewEventType,
+    error_message: str | None = None,
+) -> Interview | None:
+    """Move an `active` interview to `completed` or `interrupted`.
+
+    Returns None if the interview doesn't exist. Raises
+    IllegalTransitionError for any other source state — including a
+    second end event for the same interview.
+    """
+    # Row lock: check-then-write, same reasoning as apply_ingestion_event.
+    stmt = select(Interview).where(Interview.id == interview_id).with_for_update()
+    interview = db.scalars(stmt).one_or_none()
+    if interview is None:
+        return None
+
+    try:
+        target = target_status_for(interview.status, event_type)
+    except IllegalTransitionError:
+        db.rollback()  # release the row lock
+        raise
+
+    interview.status = target.value
+    interview.ended_at = func.now()  # DB clock, like the consume UPDATE
+    if target is InterviewStatus.INTERRUPTED and error_message:
+        # Column is String(1000); a stack-trace-sized message must not 500.
+        interview.error_message = error_message[:1000]
+
+    db.commit()
+    db.refresh(interview)
+    return interview

@@ -15,6 +15,7 @@ from core_api.db import get_db
 from core_api.interviews import service as interviews_service
 from core_api.internal.schemas import (
     IngestionEventBody,
+    InterviewEventBody,
     SessionTokenConsumeBody,
     SessionTokenConsumeResponse,
 )
@@ -102,6 +103,55 @@ def receive_ingestion_event(
         )
 
     return {"status": "accepted", "repository_id": str(repository_id)}
+
+
+@router.post(
+    "/interviews/{interview_id}/events",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_hmac)],
+    responses={
+        401: {"description": "Missing or invalid HMAC signature"},
+        404: {"description": "Interview not found"},
+        422: {"description": "Interview is not active"},
+    },
+)
+def receive_interview_event(
+    interview_id: int,
+    body: InterviewEventBody,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """Receive an end-of-session event from Voice Service (decision 036).
+
+    No retry and no event_id dedup, as with ingestion events (decision
+    029). A repeated end event gets 422: the interview is already
+    terminal.
+    """
+    error_message: str | None = None
+    if body.event_type == "interview.interrupted" and body.data is not None:
+        val = body.data.get("error_message")
+        if isinstance(val, str):
+            error_message = val
+
+    try:
+        interview = interviews_service.apply_interview_event(
+            db,
+            interview_id=interview_id,
+            event_type=body.event_type,
+            error_message=error_message,
+        )
+    except interviews_service.IllegalTransitionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    if interview is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interview not found",
+        )
+
+    return {"status": "accepted", "interview_id": str(interview_id)}
 
 
 @router.post(
