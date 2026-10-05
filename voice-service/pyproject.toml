@@ -1,0 +1,40 @@
+[project]
+name = "voice-service"
+version = "0.1.0"
+description = "RepoViva Voice Service: runs the live interview session"
+requires-python = ">=3.11"
+dependencies = [
+    # Web framework (WebSocket support comes with uvicorn[standard])
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    # Data validation & settings
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    # Outbound HTTP (Core API, Repository Service)
+    "httpx>=0.28.1",
+    "asyncpg>=0.30.0",
+    # LLM calls — provider is a config value (decision 038)
+    "litellm>=1.101.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.7.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voice_service"]
