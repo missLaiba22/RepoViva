@@ -28,7 +28,7 @@ from repository_service.internal.hmac_auth import (
     HmacVerificationError,
     verify,
 )
-from repository_service.retrieval import search_chunks
+from repository_service.retrieval import get_chunks_by_ids, search_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,12 @@ class RetrieveRequestBody(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
     filename_prefix: str | None = None
     exclude_chunk_ids: list[int] = []
+
+
+class ChunksByIdBody(BaseModel):
+    # A report covers about six turns of six chunks each; 200 leaves room
+    # without letting one call pull a whole repository.
+    ids: list[int] = Field(min_length=1, max_length=200)
 
 
 async def verify_hmac(request: Request) -> None:
@@ -130,5 +136,27 @@ async def retrieve_chunks(
         top_k=body.top_k,
         filename_prefix=body.filename_prefix,
         exclude_chunk_ids=body.exclude_chunk_ids,
+    )
+    return {"chunks": chunks}
+
+
+@router.post(
+    "/repositories/{repository_id}/chunks",
+    dependencies=[Depends(verify_hmac)],
+)
+async def get_chunks(
+    repository_id: int,
+    body: ChunksByIdBody,
+) -> dict:
+    """Return the chunks with the given ids, for Evaluation Service (decision 049).
+
+    Always 200. Ids with no row are left out rather than failing the call,
+    the same way /retrieve returns an empty list for an unknown repository.
+    No `similarity`: these chunks weren't ranked against a query.
+    """
+    chunks = await get_chunks_by_ids(
+        get_db_pool(),
+        repository_id=str(repository_id),
+        ids=body.ids,
     )
     return {"chunks": chunks}
