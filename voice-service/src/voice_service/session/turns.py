@@ -20,6 +20,12 @@ _RECORD_ANSWER = """
     WHERE id = $1 AND status = 'asked'
 """
 
+# `||` on jsonb merges objects (right side wins on a shared key), so
+# stages measured after the insert (STT, TTS) join retrieval/LLM.
+_ADD_TIMINGS = """
+    UPDATE turns SET timings = timings || $2::jsonb WHERE id = $1
+"""
+
 
 class TurnStore:
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -50,3 +56,7 @@ class TurnStore:
             result = await conn.execute(_RECORD_ANSWER, turn_id, answer_text)
         if result != "UPDATE 1":
             raise RuntimeError(f"turn {turn_id} was not in 'asked' state")
+
+    async def add_timings(self, turn_id: int, timings: dict[str, int]) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(_ADD_TIMINGS, turn_id, json.dumps(timings))

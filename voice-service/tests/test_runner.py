@@ -85,6 +85,21 @@ class FakeGenerator:
         return f"Q{len(history) + 1}?"
 
 
+class FakeTranscriber:
+    """Returns scripted transcripts in order; an Exception item is raised."""
+
+    def __init__(self, *transcripts):
+        self._transcripts = list(transcripts)
+        self.calls: list[tuple[bytes, str]] = []
+
+    async def transcribe(self, pcm, *, prompt):
+        self.calls.append((pcm, prompt))
+        result = self._transcripts.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
 class FakeTurns:
     def __init__(self):
         self.rows: dict[int, dict] = {}
@@ -98,25 +113,34 @@ class FakeTurns:
     async def record_answer(self, turn_id, answer_text):
         self.rows[turn_id]["answer"] = answer_text
 
+    async def add_timings(self, turn_id, timings):
+        self.rows[turn_id]["timings"] |= timings
 
-def make(core=None, generator=None, max_questions=2, timeout=1.0):
+
+def make(core=None, generator=None, transcriber=None, max_questions=2, timeout=1.0,
+         max_answer_seconds=180):
     parts = {
         "core": core or FakeCore(),
         "retriever": FakeRetriever(),
         "generator": generator or FakeGenerator(),
+        "transcriber": transcriber or FakeTranscriber(),
         "turns": FakeTurns(),
     }
     session = InterviewSession(
         core_api=parts["core"],
         retriever=parts["retriever"],
         generator=parts["generator"],
+        transcriber=parts["transcriber"],
         turns=parts["turns"],
-        config=SessionConfig(max_questions, timeout, retrieval_top_k=6),
+        config=SessionConfig(max_questions, timeout, retrieval_top_k=6,
+                             max_answer_seconds=max_answer_seconds),
     )
     return session, parts
 
 
 START = {"type": "session.start", "token": "tok"}
+AUDIO_END = {"type": "audio.end"}
+PCM = b"\x01\x00" * 160  # 10 ms of 16 kHz PCM16
 
 
 def answer(text):
@@ -236,3 +260,79 @@ async def test_bad_message_mid_interview_gets_error_and_continues():
 
     assert "error" in ws.types()
     assert p["core"].events == [(7, "interview.completed", None)]
+
+
+# --- Spoken answers (decisions 043, 045) --------------------------------------
+
+
+async def test_spoken_answer_is_transcribed_recorded_and_echoed():
+    transcriber = FakeTranscriber("I used asyncpg")
+    session, p = make(transcriber=transcriber, max_questions=1)
+    ws = FakeSocket(START, PCM, PCM, AUDIO_END)
+
+    await session.run(ws)
+
+    assert ws.types() == [
+        "session.ready", "question.text", "transcript.final", "turn.complete", "session.end",
+    ]
+    turn_id = ws.sent[1]["turn_id"]
+    assert ws.sent[2] == {"type": "transcript.final", "turn_id": turn_id, "text": "I used asyncpg"}
+    # Frames were joined into one answer, and the question was the prompt.
+    assert transcriber.calls == [(PCM + PCM, "Q1?")]
+    row = p["turns"].rows[turn_id]
+    assert row["answer"] == "I used asyncpg"
+    assert "stt_ms" in row["timings"]
+
+
+async def test_follow_up_uses_the_transcript():
+    session, p = make(transcriber=FakeTranscriber("because Y", "ok"), max_questions=2)
+    await session.run(FakeSocket(START, PCM, AUDIO_END, PCM, AUDIO_END))
+
+    assert p["retriever"].calls[1][0] == "Q1?\nbecause Y"
+    assert p["generator"].histories[1][0].answer == "because Y"
+
+
+@pytest.mark.parametrize(
+    ("first_try", "transcripts"),
+    [
+        ([AUDIO_END], ["real answer"]),  # no frames: STT is never called
+        ([PCM, AUDIO_END], ["", "real answer"]),  # frames with no words in them
+    ],
+)
+async def test_silence_gets_no_speech_and_the_turn_waits(first_try, transcripts):
+    transcriber = FakeTranscriber(*transcripts)
+    session, p = make(transcriber=transcriber, max_questions=1)
+    ws = FakeSocket(START, *first_try, PCM, AUDIO_END)
+
+    await session.run(ws)
+
+    errors = [m for m in ws.sent if m["type"] == "error"]
+    assert [e["code"] for e in errors] == ["no_speech"]
+    assert [r["answer"] for r in p["turns"].rows.values()] == ["real answer"]
+    assert p["core"].events == [(7, "interview.completed", None)]
+
+
+async def test_over_long_answer_is_dropped_then_retried():
+    transcriber = FakeTranscriber("short one")
+    session, p = make(transcriber=transcriber, max_questions=1, max_answer_seconds=1)
+    one_second = b"\x00" * 32_000
+    ws = FakeSocket(START, one_second, PCM, PCM, AUDIO_END, PCM, AUDIO_END)
+
+    await session.run(ws)
+
+    assert [m["code"] for m in ws.sent if m["type"] == "error"] == ["answer_too_long"]
+    # Only the retry reached STT; the over-long audio was discarded.
+    assert transcriber.calls == [(PCM, "Q1?")]
+    assert [r["answer"] for r in p["turns"].rows.values()] == ["short one"]
+
+
+async def test_stt_failure_is_interrupted():
+    session, p = make(transcriber=FakeTranscriber(RuntimeError("groq 503")))
+    ws = FakeSocket(START, PCM, AUDIO_END)
+
+    await session.run(ws)
+
+    (_, event_type, message), = p["core"].events
+    assert event_type == "interview.interrupted"
+    assert "groq 503" in message
+    assert ws.closed[0] == 1011

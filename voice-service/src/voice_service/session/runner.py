@@ -24,7 +24,8 @@ from voice_service.clients.core_api import ConsumedSession, TokenRejectedError
 from voice_service.clients.repository import Chunk
 from voice_service.llm.prompts import OPENING_SEED_QUERY, Exchange
 from voice_service.session import protocol
-from voice_service.session.protocol import AnswerText, SessionEnd, SessionStart
+from voice_service.session.protocol import AnswerText, AudioEnd, SessionEnd, SessionStart
+from voice_service.speech.stt import BYTES_PER_SECOND
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,10 @@ class Generator(Protocol):
     async def generate_question(self, history: list[Exchange], chunks: list[Chunk]) -> str: ...
 
 
+class Transcriber(Protocol):
+    async def transcribe(self, pcm: bytes, *, prompt: str) -> str: ...
+
+
 class Turns(Protocol):
     async def create_turn(
         self,
@@ -84,6 +89,7 @@ class Turns(Protocol):
         timings: dict[str, int],
     ) -> int: ...
     async def record_answer(self, turn_id: int, answer_text: str) -> None: ...
+    async def add_timings(self, turn_id: int, timings: dict[str, int]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -91,6 +97,13 @@ class SessionConfig:
     max_questions: int
     session_start_timeout_s: float
     retrieval_top_k: int
+    max_answer_seconds: int = 180  # decision 043
+
+
+@dataclass(frozen=True)
+class _Answer:
+    text: str
+    stt_ms: int | None  # None: typed (answer.text), no transcription
 
 
 # --- Runner -------------------------------------------------------------------
@@ -103,12 +116,14 @@ class InterviewSession:
         core_api: CoreApi,
         retriever: Retriever,
         generator: Generator,
+        transcriber: Transcriber,
         turns: Turns,
         config: SessionConfig,
     ) -> None:
         self._core = core_api
         self._retriever = retriever
         self._generator = generator
+        self._transcriber = transcriber
         self._turns = turns
         self._config = config
 
@@ -225,11 +240,19 @@ class InterviewSession:
             await ws.send_json(protocol.question_text(turn_id, seq, question))
 
             # 4. Wait for the answer (or the client ending the session).
-            reply = await self._await_answer(ws)
+            reply = await self._await_answer(ws, question)
             if isinstance(reply, SessionEnd):
                 return "ended_by_client"
 
+            if reply.stt_ms is not None:
+                # Show what we heard: a misheard answer explains an odd follow-up.
+                await ws.send_json(protocol.transcript_final(turn_id, reply.text))
             await self._turns.record_answer(turn_id, reply.text)
+            if reply.stt_ms is not None:
+                await self._turns.add_timings(turn_id, {"stt_ms": reply.stt_ms})
+                logger.info(
+                    "interview %s turn %s: stt=%sms", session.interview_id, seq, reply.stt_ms
+                )
             await ws.send_json(protocol.turn_complete(turn_id))
 
             history.append(Exchange(question=question, answer=reply.text))
@@ -237,21 +260,62 @@ class InterviewSession:
 
         return "completed"
 
-    async def _await_answer(self, ws: Channel) -> AnswerText | SessionEnd:
-        """Next answer.text or session.end; protocol mistakes get an error and a retry."""
+    async def _await_answer(self, ws: Channel, question: str) -> _Answer | SessionEnd:
+        """The next answer, spoken or typed, or session.end.
+
+        Spoken: binary frames accumulate until audio.end, then one STT call
+        (decision 043). Problems the client can fix — a protocol mistake,
+        silence, an over-long answer — get an `error` and the same turn
+        keeps waiting.
+        """
+        max_bytes = self._config.max_answer_seconds * BYTES_PER_SECOND
+        audio = bytearray()
+        discarding = False  # over the cap: drop frames until this answer's audio.end
+
         while True:
             raw = await _receive(ws)
+
             if isinstance(raw, bytes):
-                await ws.send_json(protocol.error("bad_message", "expected answer.text or session.end"))
+                if discarding:
+                    continue
+                audio.extend(raw)
+                if len(audio) > max_bytes:
+                    audio.clear()
+                    discarding = True
+                    await ws.send_json(protocol.error(
+                        "answer_too_long",
+                        f"answers are limited to {self._config.max_answer_seconds} seconds",
+                    ))
                 continue
+
             try:
                 msg = protocol.parse_client_message(raw)
             except ValidationError:
-                await ws.send_json(protocol.error("bad_message", "expected answer.text or session.end"))
+                await ws.send_json(protocol.error("bad_message", "expected an answer or session.end"))
                 continue
-            if isinstance(msg, (AnswerText, SessionEnd)):
+
+            if isinstance(msg, AudioEnd):
+                if discarding:  # the client was already told; start afresh
+                    discarding = False
+                    continue
+                transcript, stt_ms = await self._transcribe(bytes(audio), question)
+                audio.clear()  # decision 009: audio is not kept past transcription
+                if not transcript:
+                    await ws.send_json(protocol.error("no_speech", "no speech heard, please answer again"))
+                    continue
+                return _Answer(transcript, stt_ms)
+            if isinstance(msg, AnswerText):
+                return _Answer(msg.text, None)
+            if isinstance(msg, SessionEnd):
                 return msg
             await ws.send_json(protocol.error("bad_message", "session already started"))
+
+    async def _transcribe(self, pcm: bytes, question: str) -> tuple[str, int]:
+        if not pcm:
+            return "", 0  # nothing to send; don't spend a request on it
+        t0 = time.perf_counter()
+        text = await self._transcriber.transcribe(pcm, prompt=question)
+        return text, _ms(t0, time.perf_counter())
 
 
 async def _receive(ws: Channel) -> str | bytes:

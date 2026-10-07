@@ -12,6 +12,7 @@ from voice_service.db import get_db_pool
 from voice_service.llm.generator import get_question_generator
 from voice_service.session.runner import InterviewSession, SessionConfig
 from voice_service.session.turns import TurnStore
+from voice_service.speech.stt import get_transcriber
 
 router = APIRouter()
 
@@ -27,11 +28,13 @@ async def interview_socket(ws: WebSocket) -> None:
         core_api=get_core_api_client(),
         retriever=get_repository_client(),
         generator=get_question_generator(),
+        transcriber=get_transcriber(),
         turns=TurnStore(get_db_pool()),
         config=SessionConfig(
             max_questions=settings.max_questions,
             session_start_timeout_s=settings.session_start_timeout_s,
             retrieval_top_k=settings.retrieval_top_k,
+            max_answer_seconds=settings.max_answer_seconds,
         ),
     )
     await session.run(ws)

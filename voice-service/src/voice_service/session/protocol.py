@@ -1,4 +1,10 @@
-"""WebSocket protocol v1 (decision 039). JSON text frames: {"type": ..., ...}."""
+"""WebSocket protocol (decisions 039, 045).
+
+JSON text frames, {"type": ..., ...}, carry control messages. Binary
+frames carry audio and are not modelled here: client → server is PCM16
+16 kHz mono answer audio, server → client is PCM16 24 kHz mono question
+audio.
+"""
 
 from __future__ import annotations
 
@@ -15,8 +21,14 @@ class SessionStart(BaseModel):
     token: str = Field(min_length=1, max_length=128)
 
 
+class AudioEnd(BaseModel):
+    """The binary frames since the last answer form one answer: transcribe."""
+
+    type: Literal["audio.end"]
+
+
 class AnswerText(BaseModel):
-    """Text stand-in for audio.chunk / audio.end until STT lands."""
+    """Typed answer: the development/accessibility fallback (decision 045)."""
 
     type: Literal["answer.text"]
     # Generous for a spoken-length answer; stops a client pushing
@@ -28,12 +40,14 @@ class SessionEnd(BaseModel):
     type: Literal["session.end"]
 
 
-ClientMessage = Annotated[SessionStart | AnswerText | SessionEnd, Field(discriminator="type")]
+ClientMessage = Annotated[
+    SessionStart | AudioEnd | AnswerText | SessionEnd, Field(discriminator="type")
+]
 _client_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
 
 
 def parse_client_message(raw: str) -> ClientMessage:
-    """Raises pydantic.ValidationError for anything not in protocol v1."""
+    """Raises pydantic.ValidationError for anything not in the protocol."""
     return _client_adapter.validate_json(raw)
 
 
@@ -47,6 +61,10 @@ def session_ready(interview_id: int) -> dict[str, Any]:
 
 def question_text(turn_id: int, seq: int, text: str) -> dict[str, Any]:
     return {"type": "question.text", "turn_id": turn_id, "seq": seq, "text": text}
+
+
+def transcript_final(turn_id: int, text: str) -> dict[str, Any]:
+    return {"type": "transcript.final", "turn_id": turn_id, "text": text}
 
 
 def turn_complete(turn_id: int) -> dict[str, Any]:

@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     groq_api_key: str
     llm_model: str = "groq/llama-3.3-70b-versatile"
 
+    # Speech (decisions 043, 044). STT reuses groq_api_key.
+    stt_model: str = "groq/whisper-large-v3-turbo"
+    max_answer_seconds: int = 180
+
     # Interview shape
     max_questions: int = 6  # decision 041
     session_start_timeout_s: float = 10.0  # decision 035's consequence
