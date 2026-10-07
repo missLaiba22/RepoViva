@@ -2035,13 +2035,20 @@ validated with pydantic:
 **Grounding rules, enforced in code:**
 - Chunk ids not among the turn's chunks are dropped.
 - A key point with no valid chunk id left is dropped.
+- Chunk ids written in the prose ("as chunk 142 shows") are replaced with
+  `file:line`. The prompt asks the model not to write them, but it
+  doesn't always comply, and an id means nothing to the candidate.
 - Invalid JSON gets one retry. After that the turn is `not_graded`, and
-  the rest of the report is still produced.
+  the rest of the report is still produced. Groq's JSON mode sometimes
+  rejects the model's malformed JSON with a 400 `json_validate_failed`;
+  that counts as invalid JSON, not a provider failure.
 
-**Summary.** One last LLM call reads the per-turn results and writes
-2–3 strengths, 2–3 areas to improve, and the files worth revisiting.
-The numbers are computed in code: average correctness, average clarity,
-turns answered and turns asked.
+**Summary.** One last LLM call reads the per-turn results and writes up
+to 3 strengths (taken only from the per-turn strengths, so possibly
+none), 2–3 areas to improve, and up to 3 files worth revisiting (only
+files behind a graded turn, checked in code). The numbers are computed in
+code: average correctness, average clarity, turns answered and turns
+asked.
 
 **Partial interviews (decision 008):**
 - Turns still `asked` are listed as `not_answered` and left out of the
@@ -2069,9 +2076,40 @@ different prompts are never compared by mistake.
   actually shown to the model is the cheapest guard against invented
   claims about the code.
 
+**How it was checked:**
+Two checks, both with `gpt-oss-120b` (decision 051):
+- **Interview 7 report**, read by eye after each prompt change
+  (`evaluation-service/scripts/eval_report.py`). Scores tracked the
+  answers: "I don't know" got 1/5, and the one real explanation (the
+  deadlock question) got 4/4.
+- **Grader sanity set** (`evaluation-service/evals/`). Two real
+  questions from interview 7, each with a strong, a vague and a wrong
+  answer written from the code before any grading run.
+
+The prompt went through five versions; each fixed something the checks
+showed:
+
+| Version | Problem found | Change |
+|---|---|---|
+| v1 | Prose cited "chunk 142"; a key point proposed a redesign the code doesn't have; the summary invented a strength; "I don't know" was called "incomprehensible" | v2 rules for each |
+| v2 | Sanity set 15/16: a vague answer scored 4 (the model filled in the mechanism); a strong answer scored 3, marked down for claims the excerpts couldn't confirm and for suggesting a fix | Credit only what was said; unconfirmable claims and suggestions aren't errors. Chunk ids replaced in code |
+| v3 | Sanity set 24/24 over 3 runs, identical scores each run. But "I don't know" turns came back with no key points | Key points always required |
+| v4 | Tried "restating the question earns nothing" to push the vague answer from 3 to 2. No effect; reverted | — |
+| v5 | A summary file reason claimed a file "contains the accidental commit" (it doesn't) | Reasons say what to study, never what a file contains |
+
+Sanity set on v3 (3 runs): strong 5/5/5 and 5/5/5, vague 3/3/3 and
+1/1/1, wrong 2/2/2 and 1/1/1. The wrong answers' gaps named the actual
+mistake every time. The final v5 prompt changes only the key-point and
+summary instructions; its sanity run is pending because the day's token
+budget ran out during tuning (decision 051).
+
 **Tradeoff:**
 - About seven LLM calls per report instead of one, which is slower
   under the free-tier rate limit (decision 051).
+- **Lenient on vague answers.** A vague answer that repeats the
+  question's own terms scores 3, not the 2 the rubric asks for. It still
+  ranks below a strong answer and above a wrong one. Two prompt rules
+  didn't move it.
 - The judge only sees the chunks the question was built from. An answer
   that is correct about code outside those chunks can be under-scored.
 - A dropped key point is silent to the candidate. The count of dropped
@@ -2093,8 +2131,11 @@ different prompts are never compared by mistake.
 Evaluation Service calls `groq/openai/gpt-oss-120b` through litellm, with
 low reasoning effort and JSON output. The name is a config value,
 `EVAL_LLM_MODEL`, separate from Voice Service's `LLM_MODEL`
-(`qwen/qwen3.8-27b`, decision 046). Calls run one after another, with
-retry and exponential back-off on HTTP 429.
+(`qwen/qwen3.8-27b`, decision 046). Calls run one after another. On
+HTTP 429 the service waits as long as Groq asks (the wait is in the
+error message, "try again in 6.5s"; 15 s if it doesn't say), up to 8
+times. A wait over 60 s means the daily limit is spent, so the report
+fails at once and a later trigger regenerates it (decision 049).
 
 **Why:**
 - **A separate model is a separate rate-limit bucket.** Groq's free tier
@@ -2110,19 +2151,30 @@ retry and exponential back-off on HTTP 429.
   `qwen3.8-27b`, `allam-2-7b`), the 120B model is the largest. It has a
   131k context window and supports JSON output.
 
+**Measured (2026-10-08):**
+- A six-turn report (interview 7) took 58–90 s. After the first two
+  calls, each call waited once for the per-minute limit (~15 s).
+- **Daily limit: 200,000 tokens per model**, found when tuning hit it.
+  It's in the 429 message, not the response headers checked earlier. A
+  grading call requests about 2.7k tokens, so a six-turn report is
+  roughly 18k: **about 10 reports a day** on the free tier. Each report
+  now logs its token count, so this can be measured rather than
+  estimated.
+- Grading quality: decision 050's sanity set, 24/24 checks over 3 runs.
+
 **Tradeoff:**
-- Reasoning tokens count against the 8k-per-minute limit. A grading
-  call is about 3k tokens, so a six-turn report takes roughly 2–4
-  minutes. That is fine in the background, but it means one report at
-  a time.
-- Chosen on paper. Grading quality is checked with the sanity set
-  (strong, vague and wrong answers to real questions from interviews 7
-  and 8) when the grader is built, and recorded here.
+- About 10 reports a day across all users. Enough for development and a
+  demo; not for real use.
+- A daily-limit 429 fails the report instead of waiting hours. It is
+  regenerated on the next trigger, including the lazy re-trigger when
+  the report is read (decision 049).
 - Same single-provider risk as decision 046: Groq can retire the model.
   The name is in config.
 
 **Revisit when:**
 - The sanity set doesn't rank strong > vague > wrong on correctness.
-- Reports take long enough that users notice, or several must run at
-  once: a paid tier, or a smaller prompt.
+- Reports fail on the daily limit outside development, or more than
+  about 10 interviews a day are expected: a paid tier, `gpt-oss-20b`
+  (its own 200k bucket, but check the sanity set first), or a shorter
+  prompt.
 - Groq retires the model.

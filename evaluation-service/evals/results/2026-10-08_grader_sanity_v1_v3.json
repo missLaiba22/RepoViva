@@ -1,0 +1,739 @@
+{
+  "model": "groq/openai/gpt-oss-120b",
+  "prompt_version": "v3",
+  "results": [
+    {
+      "case": "deadlock-lock-order",
+      "runs": [
+        {
+          "run": 1,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly describes that the order creation code sorts items by product_id before acquiring SELECT ... FOR UPDATE locks (backend/app/modules/orders/service.py:12) and that this canonical lock order prevents deadlocks. They also note that promo validation/locking occurs after product locks, matching the comment in the code (backend/app/modules/orders/service.py:54). No inaccurate statements were made."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The explanation is concise, well\u2011ordered, and uses precise terms (canonical order, deadlock, waiting, commit). The interviewer could easily follow the reasoning."
+              },
+              "strengths": [
+                "Identified the sorting step and its purpose.",
+                "Explained the deadlock scenario clearly with two concurrent checkouts.",
+                "Mentioned the promo lock ordering as part of the global lock order."
+              ],
+              "gaps": [
+                "Did not reference the specific implementation detail that sorting uses a string conversion of product_id, though this is minor."
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, ensuring a consistent lock acquisition order across concurrent checkouts.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promotion validation and locking is performed after all product rows are locked, preserving the same global lock order.",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 3,
+                "justification": "The candidate correctly identified that sorting by product_id creates a consistent lock order, which helps avoid deadlocks, matching the comment in the code. However, the explanation is vague and does not describe how consistent ordering prevents circular wait conditions, nor does it mention the specific lock ordering relative to promotions."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable and stays on topic, but it is loosely phrased and lacks concrete details, making it only moderately clear."
+              },
+              "strengths": [
+                "Mentions that sorting creates consistency",
+                "Recognizes that this is a concurrency best practice"
+              ],
+              "gaps": [
+                "Does not explain why consistent ordering prevents deadlocks (circular wait)",
+                "Calls it a generic \"database confusion\" without linking to lock acquisition",
+                "Omits mention of the promo lock order which is also part of the deadlock prevention strategy"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring locks, establishing a canonical lock order so concurrent checkouts acquire product locks in the same sequence, preventing circular wait deadlocks.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promotion validation and locking occurs after product locks, preserving the same lock ordering across different checkout paths.",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate claims sorting by product_id makes lookups faster and relies on optimistic locking, but the code shows sorting is used to enforce a canonical lock order to avoid deadlocks (backend/app/modules/orders/service.py:12\u2011144, 244\u2011246). There is no evidence of optimistic locking or version columns, so the explanation is mostly wrong."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable and mentions sorting and locking, but it misstates the mechanism and adds unrelated details, so it does not clearly answer the question."
+              },
+              "strengths": [
+                "Mentions that sorting by product ID is performed before locking",
+                "References locking behavior in the checkout process"
+              ],
+              "gaps": [
+                "Incorrectly attributes deadlock prevention to faster index reads rather than consistent lock ordering",
+                "Introduces optimistic locking with a version column that does not exist in the code",
+                "Fails to mention that promo locks are acquired after product locks, as shown in the code"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, ensuring all concurrent checkouts acquire product locks in the same order and thus avoid circular wait conditions.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promo validation and locking is performed after product locks, preserving the same global lock order and preventing deadlocks involving promotions.",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            }
+          }
+        },
+        {
+          "run": 2,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly describes the canonical lock order implemented in create_order: items are sorted by product_id before acquiring SELECT ... FOR UPDATE locks (backend/app/modules/orders/service.py:12) and the promo lock is taken after the product locks (backend/app/modules/orders/service.py:54). This matches the code comments about preventing deadlocks."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The explanation is concise, well\u2011ordered, and uses concrete terms (sorting, locking, deadlock scenario). An interviewer can easily follow the reasoning."
+              },
+              "strengths": [
+                "Identified the sorting step before locking.",
+                "Explained the deadlock scenario with two concurrent checkouts.",
+                "Mentioned that promo locking follows the product locks, preserving the global order."
+              ],
+              "gaps": [
+                "Did not note the explicit comment about \"canonical lock order\" in the code, but the core idea was covered."
+              ],
+              "key_points": [
+                {
+                  "point": "create_order sorts cart items by product_id before acquiring any row locks, ensuring a consistent lock acquisition order across concurrent checkouts",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "the promotion lock is taken after all product locks, maintaining the same global lock ordering",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 3,
+                "justification": "The candidate correctly identified that sorting by product_id creates a consistent order which helps with concurrency, matching the comment in the code that this prevents deadlocks. However, they did not explain the mechanism (same lock order avoids circular wait) and gave only a generic best\u2011practice statement."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable and directly addresses the question, but it is vague and lacks detail, making it only moderately clear."
+              },
+              "strengths": [
+                "Mentions that sorting creates consistency",
+                "References concurrency concerns",
+                "Uses concise language"
+              ],
+              "gaps": [
+                "Does not explain how consistent lock ordering prevents circular wait deadlocks",
+                "Provides only a generic best\u2011practice claim without linking to the specific lock order logic",
+                "Fails to mention that the sorting is done before acquiring DB row locks"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, ensuring that all concurrent checkouts acquire product locks in the same order, which eliminates circular wait conditions and thus prevents deadlocks.",
+                  "chunk_ids": [
+                    142
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate says sorting by product ID makes lookups faster and that optimistic locking with a version column prevents conflicts. The code actually sorts to enforce a canonical lock order (backend/app/modules/orders/service.py:12 and backend/app/modules/orders/service.py:54) to avoid deadlocks; there is no evidence of optimistic locking or a version column. Thus the answer is mostly wrong."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable and follows a logical flow, but it does not address the specific mechanism asked about and introduces unrelated concepts, making it only loosely related to the question."
+              },
+              "strengths": [],
+              "gaps": [
+                "Incorrect claim that sorting improves index read speed for deadlock avoidance",
+                "Mentions optimistic locking with a version column which is not present in the code",
+                "Fails to explain the canonical lock order that actually prevents deadlocks"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, ensuring all concurrent checkouts lock products in the same order and thus avoid circular wait conditions that cause deadlocks.",
+                  "chunk_ids": [
+                    142,
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            }
+          }
+        },
+        {
+          "run": 3,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly describes the mechanism implemented in the code: the service sorts items by product_id before acquiring locks (canonical lock order) and locks promo codes only after product rows, matching the comments in backend/app/modules/orders/service.py:12 and backend/app/modules/orders/service.py:54."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The explanation is concise, well\u2011ordered, and directly answers the interviewer's question about deadlock prevention."
+              },
+              "strengths": [
+                "Identifies the sorting of cart items by product_id before locking",
+                "Explains the classic deadlock scenario and how a canonical order resolves it",
+                "Mentions that promo locks occur after product locks, preserving the global lock order"
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "The order creation service sorts items by product_id before acquiring SELECT\u202fFOR\u202fUPDATE locks, ensuring all concurrent checkouts lock products in the same sequence and avoid deadlocks.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promo code validation and locking is performed after all product rows are locked, maintaining a consistent global lock order.",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 3,
+                "justification": "The candidate correctly identified that sorting by product_id provides consistency and helps with concurrency, which aligns with the code comment about a canonical lock order to avoid deadlocks. However, they did not explain the mechanism (same lock acquisition order prevents circular wait) or mention that promo locks occur after product locks."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable and mentions consistency and best practice, but it is brief and lacks detail, making it only moderately clear."
+              },
+              "strengths": [
+                "Recognized that sorting provides consistency",
+                "Mentioned concurrency concerns"
+              ],
+              "gaps": [
+                "Did not explain how consistent ordering prevents circular wait deadlocks",
+                "Did not note that locks are acquired in the sorted order before any other locks",
+                "Did not mention that promo locks are taken after product locks"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, establishing a canonical lock order so concurrent checkouts acquire locks in the same sequence, preventing circular wait deadlocks.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promotion validation and locking happens after product locks, preserving the same lock ordering hierarchy.",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate mentions sorting by product ID prevents deadlocks, which is true (canonical lock order is used in the code). However, they incorrectly claim the reason is faster index reads and that optimistic locking with a version column is used, neither of which is present in the code excerpts."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable and stays on topic about sorting and deadlocks, but the explanation is inaccurate and includes unrelated concepts, making it only moderately clear."
+              },
+              "strengths": [
+                "Identified that sorting by product ID is part of the solution",
+                "Recognized that deadlocks are a concern in concurrent checkouts"
+              ],
+              "gaps": [
+                "Incorrectly attributes deadlock avoidance to faster index reads",
+                "Mentions optimistic locking with a version column, which the code does not implement",
+                "Does not explain the canonical lock order concept that the code uses"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring locks so that all concurrent checkouts acquire product locks in the same order, eliminating circular wait conditions",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promotion validation locks are taken after product locks to maintain a consistent lock hierarchy and avoid deadlocks",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "lost-expiry-webhook",
+      "runs": [
+        {
+          "run": 1,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly described that stock is decremented when a Stripe checkout session is created (see backend/app/modules/orders/service.py:127) and that it is only restored when the checkout.session.expired webhook is processed (see backend/app/modules/orders/service.py:214). The code does not contain any other mechanism such as a background job to return stock, so if the webhook is never delivered the stock remains reserved, matching the candidate\u2019s explanation."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer directly addressed the interview question, explained the flow step\u2011by\u2011step, and clearly stated the consequence of a missing webhook and a possible fix."
+              },
+              "strengths": [
+                "Identified the exact point where stock is decremented",
+                "Explained the role of the expiry webhook in restoring stock",
+                "Noted the absence of any fallback mechanism"
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "Stock quantity is reduced when a checkout session is created (product.stock_quantity -= quantity)",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "The only code that can restore stock runs in the checkout.session.expired webhook handler, which checks for a pending checkout before acting",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "There is no background job or other logic to return stock if the expiry webhook never arrives, so the reservation can remain indefinitely",
+                  "chunk_ids": [
+                    407,
+                    471
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate says the stock will stay fine and be handled by Stripe, but the code shows stock is decremented when a checkout is created and only restored when the `mark_checkout_expired` webhook runs (see the stock decrement in backend/app/modules/orders/service.py:127 and the early\u2011return logic in backend/app/modules/orders/service.py:214). If the expiry webhook is lost, the stock is not restored, so the candidate\u2019s claim is false."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is brief and vague, offering no concrete explanation of how the system handles the situation, making it hard for an interviewer to follow."
+              },
+              "strengths": [],
+              "gaps": [
+                "Did not mention that stock is decremented at checkout creation (backend/app/modules/orders/service.py:127).",
+                "Did not explain that stock is only restored in `mark_checkout_expired` when the webhook arrives (backend/app/modules/orders/service.py:214).",
+                "Assumed Stripe would automatically fix the issue, which is not reflected in the code."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock quantity is reduced when a checkout is created (product.stock_quantity -= quantity)",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "If the checkout expires, `mark_checkout_expired` restores the stock, but only if the webhook is received; otherwise the stock remains decremented",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "The system relies on the webhook to trigger the restoration; a lost webhook means the stock is not automatically corrected",
+                  "chunk_ids": [
+                    407
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate claims stock is only decremented after payment succeeds, but the code in backend/app/modules/orders/service.py:127 shows stock_quantity is reduced when the checkout session is created, before payment. Therefore the statement is false."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is concise and directly addresses the question, making it easy to follow, though it contains an incorrect premise."
+              },
+              "strengths": [
+                "Answered the specific question directly",
+                "Kept the response brief and to the point"
+              ],
+              "gaps": [
+                "Incorrectly states that stock is not decremented until payment succeeds (stock is decremented at checkout creation)",
+                "Fails to mention that stock would be restored in the expiry webhook handling",
+                "Does not acknowledge the warning log for missing webhook events"
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented when a checkout session is created, not when payment succeeds (see backend/app/modules/orders/service.py:127).",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "If a checkout expires, the system logs a warning and returns without raising, but stock restoration would be handled elsewhere (see backend/app/modules/orders/service.py:197 and DECISIONS.md discussion).",
+                  "chunk_ids": [
+                    399,
+                    471
+                  ]
+                },
+                {
+                  "point": "Missing webhook events are logged as warnings to avoid silent failures (see DECISIONS.md DECISIONS.md:508).",
+                  "chunk_ids": [
+                    471
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                399,
+                471
+              ]
+            }
+          }
+        },
+        {
+          "run": 2,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly described that stock is decremented when a checkout session is created (see the stock_quantity update in backend/app/modules/orders/service.py:127) and that the only place stock could be restored is in the expiry webhook handling (mark_checkout_expired in backend/app/modules/orders/service.py:214). The code does not contain any other mechanism such as a background job to restore stock if the webhook is lost, so the candidate\u2019s claim that the units remain reserved is accurate."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer directly addressed the interview question, explained the flow step\u2011by\u2011step, and clearly stated the missing recovery path."
+              },
+              "strengths": [
+                "Identified the exact point where stock is decremented",
+                "Explained the reliance on the expiry webhook for stock restoration",
+                "Pointed out the lack of any fallback mechanism"
+              ],
+              "gaps": [
+                "Did not mention that the code logs a warning when the webhook\u2019s session_id is unknown (DECISIONS.md:508)"
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented at checkout creation by reducing product.stock_quantity (backend/app/modules/orders/service.py:127).",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "The expiry webhook handler (mark_checkout_expired) only checks for a pending checkout and does not contain logic to restore stock; it simply returns if the checkout is not found or already processed (backend/app/modules/orders/service.py:214).",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "There is no background job or other code path that restores stock if the expiry webhook is never received, so the reserved units remain unavailable (inferred from the absence of restoration logic).",
+                  "chunk_ids": [
+                    353,
+                    407
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate says the stock will be fine and that Stripe will handle it, but the code shows stock is decremented when a checkout is created and only restored when the `checkout.session.expired` webhook is processed (see backend/app/modules/orders/service.py:127 and backend/app/modules/orders/service.py:214). If that webhook is lost, the stock is not restored, so the candidate\u2019s claim is false."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is brief but vague and does not directly address the specific scenario asked about. It wanders into generic statements about Stripe and consistency without explaining the project\u2019s behavior."
+              },
+              "strengths": [],
+              "gaps": [
+                "Did not mention that stock is decremented at checkout creation (backend/app/modules/orders/service.py:127).",
+                "Did not explain that stock is only restored when the expiry webhook runs (backend/app/modules/orders/service.py:214).",
+                "Failed to acknowledge that a missing webhook would leave stock incorrectly reduced."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock quantity is reduced when a checkout is created (product.stock_quantity -= quantity).",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "When a Stripe `checkout.session.expired` webhook is received, the service checks the checkout and, if still pending, would restore stock (implicit from the comment that it \u201cdoesn't re\u2011release stock\u201d if already paid).",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "If the expiry webhook is never delivered, the code has no fallback to restore stock, so the decremented stock remains reduced.",
+                  "chunk_ids": [
+                    407,
+                    471
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate says stock is only decremented after payment succeeds and that losing the expiry webhook means no stock was taken. The code actually decrements stock when the checkout is created (before payment) in service.py (backend/app/modules/orders/service.py:127) and restores it only if the expiry webhook runs (backend/app/modules/orders/service.py:197\u2011407). Therefore the statement is incorrect."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is concise and directly addresses the question, but it is factually wrong about when stock is decremented."
+              },
+              "strengths": [],
+              "gaps": [
+                "Claim that stock is not decremented until payment succeeds is false; stock is reduced at checkout creation (backend/app/modules/orders/service.py:127).",
+                "Implies that losing the expiry webhook has no effect, but the code relies on that webhook to restore stock (backend/app/modules/orders/service.py:197\u2011407)."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented when a checkout is created, not when payment succeeds (see product.stock_quantity -= quantity in service.py).",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "If a Stripe session expires, the expiry webhook restores the stock by checking the checkout and only acting if payment_status is still PENDING (see mark_checkout_expired logic).",
+                  "chunk_ids": [
+                    399,
+                    407
+                  ]
+                },
+                {
+                  "point": "The system logs a warning and returns quietly if the expiry webhook\u2019s stripe_session_id is unknown, but it still relies on the webhook to perform the restoration (see DECISIONS.md discussion of webhook handling).",
+                  "chunk_ids": [
+                    471
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                399,
+                407,
+                471
+              ]
+            }
+          }
+        },
+        {
+          "run": 3,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly described that stock is decremented when a Stripe checkout session is created (see backend/app/modules/orders/service.py:127) and that it is only restored when the checkout.session.expired webhook triggers mark_checkout_expired, which checks for a pending checkout before releasing stock (see backend/app/modules/orders/service.py:214). The code contains no other mechanism such as a background job to restore stock if the webhook is lost, so the candidate\u2019s claim that the stock would remain reserved is accurate."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer directly addressed the interview question, explained the flow step\u2011by\u2011step, and clearly stated the consequence and a possible mitigation. It was well\u2011ordered and easy to follow."
+              },
+              "strengths": [
+                "Identified the exact point where stock is decremented",
+                "Explained the reliance on the expiry webhook to restore stock",
+                "Suggested a concrete improvement (periodic sweep)"
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "Stock is decremented at checkout creation by reducing product.stock_quantity",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "The only code that restores stock runs in mark_checkout_expired, which only acts on pending checkouts to avoid double\u2011release",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "There is no background process or retry mechanism for lost expiry webhooks, so stock can remain reserved indefinitely",
+                  "chunk_ids": [
+                    471,
+                    465
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471,
+                465
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate says the stock will stay fine and be handled by Stripe, but the code shows stock is decremented when a checkout is created and only restored when the `mark_checkout_expired` webhook runs (see the stock decrement in backend/app/modules/orders/service.py:127 and the early\u2011return logic in backend/app/modules/orders/service.py:214). If the expiry webhook is lost, the stock is never restored, so the candidate\u2019s claim is false."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is brief and vague, offering no concrete explanation of how the system handles the situation. It does not directly address the question about a missing expiry webhook."
+              },
+              "strengths": [],
+              "gaps": [
+                "Did not mention that stock is decremented at checkout creation (backend/app/modules/orders/service.py:127).",
+                "Did not explain that stock is restored only when `mark_checkout_expired` runs (implied by the early\u2011return in backend/app/modules/orders/service.py:214).",
+                "Failed to acknowledge the risk of a lost webhook leaving stock permanently reduced, which the code and decisions document discuss (DECISIONS.md:508 and DECISIONS.md:567)."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented when a checkout is created (product.stock_quantity -= quantity) \u2013 see backend/app/modules/orders/service.py:127.",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "When the Stripe `checkout.session.expired` webhook is received, `mark_checkout_expired` checks the checkout and would restore stock, but if the webhook is missing the early return prevents any restoration \u2013 see backend/app/modules/orders/service.py:214.",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "The design notes that missing webhook IDs are logged but not retried, meaning abandoned sessions can leave stock permanently reduced \u2013 see DECISIONS.md:508.",
+                  "chunk_ids": [
+                    471
+                  ]
+                },
+                {
+                  "point": "A plain counter would have the same flaw; the project uses a reservation ledger to track limited resources across async payment lifecycles \u2013 see DECISIONS.md:567.",
+                  "chunk_ids": [
+                    481
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471,
+                481
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate claims stock is only decremented after payment succeeds, but the code in backend/app/modules/orders/service.py:127 shows stock_quantity is reduced when the checkout session is created, before payment. Therefore the statement is incorrect."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is concise and directly addresses the question, making it easy to follow, but it is factually wrong."
+              },
+              "strengths": [],
+              "gaps": [
+                "Incorrectly states that stock is not decremented until payment succeeds, contradicting the actual decrement at checkout creation (backend/app/modules/orders/service.py:127).",
+                "Does not mention the mechanism that would restore stock on an expiry webhook, which is part of the project's handling of lost webhooks."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock quantity is reduced when a checkout session is created, not after payment, as shown by the decrement in the service code.",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "The expiry webhook checks the checkout status and would handle restoration, but if the webhook is lost the system relies on this logic; the code does not wait for payment to decrement stock.",
+                  "chunk_ids": [
+                    407
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

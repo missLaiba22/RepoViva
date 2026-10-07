@@ -1,0 +1,31 @@
+{
+  "name": "grader_sanity_v1",
+  "description": "Strong, vague and wrong answers to two real questions from interview 7 (repository 15). Answers were written from the code before any grading run. Expect correctness strong > vague and strong > wrong, strong >= 4, wrong <= 2, and the wrong answer's gaps naming its actual mistake.",
+  "repository_id": 15,
+  "cases": [
+    {
+      "id": "deadlock-lock-order",
+      "source": "interview 7, turn 4",
+      "question": "Why does sorting by product_id before locking prevent deadlocks when two checkouts involve the same two products in different order?",
+      "chunk_ids": [142, 244, 401, 216, 402, 355],
+      "answers": {
+        "strong": "In create order I sort the cart items by product ID before taking any locks, and then lock each product row with select for update in that order. Without that, checkout A could lock product one and wait for product two while checkout B holds product two and waits for product one, so each waits on the other forever. With one canonical order both checkouts go for product one first, so the second just waits until the first commits and then carries on. The promo code is always locked after the products, so it keeps the same global order.",
+        "vague": "Sorting just keeps things consistent, so the database doesn't get confused when a lot of people check out at the same time. It's basically a best practice for concurrency and it makes the checkout safer.",
+        "wrong": "Sorting by product ID makes the lookups faster because the database reads the index in order, so locks are held for less time and the two checkouts don't overlap. And we use optimistic locking with a version column anyway, so if both update the same product one of them just retries."
+      },
+      "wrong_mistake_keywords": ["optimistic", "version", "performance", "faster", "speed"]
+    },
+    {
+      "id": "lost-expiry-webhook",
+      "source": "interview 7, turn 6",
+      "question": "What happens to the decremented stock when the Stripe session times out but the webhook for that expiry is lost or never delivered?",
+      "chunk_ids": [407, 353, 399, 471, 465, 481],
+      "answers": {
+        "strong": "Stock is taken when the Stripe checkout session is created, not when payment succeeds. It only comes back when the checkout session expired webhook arrives and mark checkout expired finds a checkout that is still pending; the pending check stops stock being released twice. If that webhook is never delivered, nothing else in the code gives the stock back, there's no background job, so those units stay reserved and the product can look sold out. The fix would be a periodic sweep that expires old pending checkouts.",
+        "vague": "I think the stock would probably be fine. Stripe handles that kind of thing and the system is designed to stay consistent, so it should sort itself out eventually.",
+        "wrong": "Nothing is lost, because we don't decrement stock until the payment succeeds. The decrement happens in the checkout session completed webhook, so if the expiry webhook is lost the stock was never taken in the first place."
+      },
+      "wrong_mistake_keywords": ["creat", "completed", "never taken", "before payment", "at checkout", "session creation"]
+    }
+  ]
+}
