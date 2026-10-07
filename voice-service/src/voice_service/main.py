@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from voice_service.db import apply_schema, close_pool, init_pool
+from voice_service.internal.router import router as internal_router
 from voice_service.ws import router as ws_router
 
 logging.basicConfig(
@@ -30,6 +31,7 @@ app = FastAPI(
 )
 
 app.include_router(ws_router)
+app.include_router(internal_router)
 
 
 @app.get("/health")

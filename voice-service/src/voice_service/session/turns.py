@@ -27,6 +27,16 @@ _ADD_TIMINGS = """
 """
 
 
+# For Evaluation Service (decision 049). Timings stay internal: they
+# measure the pipeline, not the candidate.
+_LIST_TURNS = """
+    SELECT seq, question_text, answer_text, status, retrieved_chunk_ids
+    FROM turns
+    WHERE interview_id = $1
+    ORDER BY seq
+"""
+
+
 class TurnStore:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -56,6 +66,12 @@ class TurnStore:
             result = await conn.execute(_RECORD_ANSWER, turn_id, answer_text)
         if result != "UPDATE 1":
             raise RuntimeError(f"turn {turn_id} was not in 'asked' state")
+
+    async def list_turns(self, interview_id: int) -> list[dict]:
+        """Every turn of an interview in order; empty if it has none."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(_LIST_TURNS, interview_id)
+        return [{**row, "retrieved_chunk_ids": list(row["retrieved_chunk_ids"])} for row in rows]
 
     async def add_timings(self, turn_id: int, timings: dict[str, int]) -> None:
         async with self._pool.acquire() as conn:
