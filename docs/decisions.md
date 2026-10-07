@@ -1609,3 +1609,141 @@ The end event goes to Core API's `POST /internal/v1/interviews/{id}/events`
 **Revisit when:**
 - Users repeating interviews notice the same opening question.
 - Decision 034's coverage triggers fire.
+
+---
+
+## 043 — Speech-to-text: Groq Whisper, batch, one call per answer
+
+**Decision:**
+Voice Service transcribes each answer with Groq's
+`whisper-large-v3-turbo`, called through `litellm.atranscription` (model
+string in `STT_MODEL`). The client streams raw audio while the candidate
+speaks; Voice Service buffers it in memory and makes one transcription
+call when the client sends `audio.end`. The question just asked is passed
+as Whisper's `prompt`, so identifiers it mentions (`TurnStore`,
+`pgvector`) are more likely to be spelled correctly in the transcript.
+
+Answers are capped at `MAX_ANSWER_SECONDS` (default 180). Empty audio or
+a blank transcript is reported to the client as `no_speech` and the same
+turn waits for another attempt; nothing is recorded.
+
+**Why:**
+- **Same key, same library.** Groq is already the LLM provider (decision
+  038). The free tier allows 2,000 transcription requests a day, which is
+  hundreds of interviews.
+- **Batch is enough for this product.** The next question can't be
+  generated until the answer is complete anyway, so a streaming
+  transcript would only buy live captions, not a faster turn. Whisper on
+  Groq transcribes a minute of audio in well under a second.
+- **Prompting with the question** is Whisper's documented way to bias
+  vocabulary. Code interviews are dense with identifiers that general
+  speech models mishear.
+
+**Alternatives considered:**
+- **Deepgram Nova-3 streaming.** Gives live partial transcripts and
+  end-of-speech detection, but adds a second streaming connection per
+  turn. Deferred: see revisit triggers.
+- **Local Whisper.** Free and private, but too slow on development
+  hardware for the turn budget (decision 006).
+
+**Tradeoff:**
+- The whole STT call sits on the turn's critical path after the
+  candidate stops speaking. Measured as `stt_ms` in `turns.timings`.
+- The candidate decides when the answer ends (the client sends
+  `audio.end`). There is no server-side voice activity detection.
+- Audio is held in memory for one answer at most, then discarded
+  (decision 009).
+
+**Revisit when:**
+- `stt_ms` takes a large share of the 4–5 s budget at p95.
+- The frontend wants live captions or automatic end-of-speech detection.
+- Rate limits are hit in normal use.
+
+---
+
+## 044 — Text-to-speech: Deepgram Aura-2, streamed as raw PCM
+
+**Decision:**
+Voice Service speaks each question with Deepgram Aura-2 (voice in
+`TTS_VOICE`, default `aura-2-thalia-en`) through its REST endpoint
+`POST /v1/speak`, requesting `linear16` at 24 kHz with no container. The
+HTTP response is read as a stream and every chunk is forwarded to the
+client as a binary WebSocket frame as soon as it arrives.
+
+**Why:**
+- **Time to first audio is what the user feels.** Decision 006 measures
+  latency to the moment question audio *starts*. Forwarding chunks as
+  they arrive means playback can begin before synthesis finishes.
+- **Raw PCM** needs no decoding on either side and can be played chunk by
+  chunk; a WAV or MP3 container would have to be parsed first.
+- **Cost.** About $0.03 per 1,000 characters against a $200 starting
+  credit. A six-question interview is roughly 1,500 characters.
+- Groq's own TTS free tier (about 100 requests a day) covers only a
+  handful of interviews.
+
+**Alternatives considered:**
+- **Groq Orpheus TTS.** One provider for everything, but the free tier is
+  too small to develop against.
+- **Local TTS (Piper).** Free, but a weaker voice and CPU load inside the
+  service.
+- **Deepgram's WebSocket TTS.** Lower overhead per request, but only
+  worthwhile when text arrives incrementally (streaming LLM output).
+
+**Tradeoff:**
+- A second paid vendor and API key.
+- A TTS failure ends the interview as `interrupted`, the same as an LLM
+  failure (decision 041). The question text was already sent, so a
+  fallback to text-only was possible but would break decision 003.
+
+**Revisit when:**
+- The LLM response is streamed; TTS could then start on the first
+  sentence (WebSocket TTS).
+- The credit runs low or per-character cost matters.
+
+---
+
+## 045 — WebSocket protocol v2: audio frames
+
+**Decision:**
+Protocol v1 (decision 039) gains audio. Binary WebSocket frames carry
+audio in both directions; JSON text frames carry everything else.
+
+    Client → Server
+      <binary>       answer audio: PCM16 little-endian, 16 kHz, mono
+      audio.end      {}            answer finished, transcribe it
+      answer.text    { text }      kept as a typed fallback
+      (session.start, session.end unchanged)
+
+    Server → Client
+      question.text       { turn_id, seq, text }   sent first, as captions
+      <binary>            question audio: PCM16 little-endian, 24 kHz, mono
+      question.audio_end  { turn_id }
+      transcript.final    { turn_id, text }
+      (session.ready, turn.complete, session.end, error unchanged)
+
+New error codes: `no_speech` and `answer_too_long` (socket stays open, the
+turn waits for another answer).
+
+The client opens the microphone only after `question.audio_end`. There
+is no barge-in.
+
+**Why:**
+- **Binary frames** avoid base64 (a third larger, and an encode/decode on
+  every chunk). The frame type alone tells text from audio, so no
+  `audio.chunk` envelope is needed.
+- **Raw PCM from the client** is what a browser `AudioWorklet` produces
+  directly. The server adds the WAV header before calling STT.
+- **`answer.text` stays** because it is free to keep: the runner tests,
+  the CLI's typed mode and a future accessibility fallback (decision
+  003's revisit trigger) all use it. It is a development path, not a
+  product modality.
+
+**Tradeoff:**
+- 16 kHz PCM is about 32 KB per second, so a three-minute answer is
+  about 6 MB on the socket. Fine for one user on a normal connection; a
+  compressed codec (Opus) would cut it tenfold.
+- Without barge-in, a candidate can't interrupt a long question.
+
+**Revisit when:**
+- Upload size matters (mobile networks): switch the client to Opus.
+- Users want to interrupt questions: add barge-in.
