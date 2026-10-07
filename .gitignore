@@ -26,6 +26,8 @@ core-api/journal.md
 _[!_]*.py
 
 # Where cloned repositories live on disk. Directory is created on demand.
-WORKSPACE_ROOT=./workspace
 # Ephemeral scratch space for cloned repositories.
 workspace/
+
+# Local throwaway scripts and fixture repos.
+repository-service/scratch/
