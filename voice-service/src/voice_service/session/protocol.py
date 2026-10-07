@@ -63,6 +63,11 @@ def question_text(turn_id: int, seq: int, text: str) -> dict[str, Any]:
     return {"type": "question.text", "turn_id": turn_id, "seq": seq, "text": text}
 
 
+def question_audio_end(turn_id: int) -> dict[str, Any]:
+    """All of the question's audio frames have been sent."""
+    return {"type": "question.audio_end", "turn_id": turn_id}
+
+
 def transcript_final(turn_id: int, text: str) -> dict[str, Any]:
     return {"type": "transcript.final", "turn_id": turn_id, "text": text}
 

@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Speech (decisions 043, 044). STT reuses groq_api_key.
     stt_model: str = "groq/whisper-large-v3-turbo"
     max_answer_seconds: int = 180
+    deepgram_api_key: str
+    tts_voice: str = "aura-2-thalia-en"
 
     # Interview shape
     max_questions: int = 6  # decision 041

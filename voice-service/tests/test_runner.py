@@ -100,6 +100,21 @@ class FakeTranscriber:
         return result
 
 
+class FakeSynthesizer:
+    """Yields two audio chunks per question, or fails after the first."""
+
+    def __init__(self, fail=False):
+        self._fail = fail
+        self.texts: list[str] = []
+
+    async def synthesize(self, text):
+        self.texts.append(text)
+        yield b"aud1-" + text.encode()
+        if self._fail:
+            raise RuntimeError("deepgram 402")
+        yield b"aud2"
+
+
 class FakeTurns:
     def __init__(self):
         self.rows: dict[int, dict] = {}
@@ -117,13 +132,14 @@ class FakeTurns:
         self.rows[turn_id]["timings"] |= timings
 
 
-def make(core=None, generator=None, transcriber=None, max_questions=2, timeout=1.0,
-         max_answer_seconds=180):
+def make(core=None, generator=None, transcriber=None, synthesizer=None, max_questions=2,
+         timeout=1.0, max_answer_seconds=180):
     parts = {
         "core": core or FakeCore(),
         "retriever": FakeRetriever(),
         "generator": generator or FakeGenerator(),
         "transcriber": transcriber or FakeTranscriber(),
+        "synthesizer": synthesizer or FakeSynthesizer(),
         "turns": FakeTurns(),
     }
     session = InterviewSession(
@@ -131,6 +147,7 @@ def make(core=None, generator=None, transcriber=None, max_questions=2, timeout=1
         retriever=parts["retriever"],
         generator=parts["generator"],
         transcriber=parts["transcriber"],
+        synthesizer=parts["synthesizer"],
         turns=parts["turns"],
         config=SessionConfig(max_questions, timeout, retrieval_top_k=6,
                              max_answer_seconds=max_answer_seconds),
@@ -154,8 +171,8 @@ async def test_full_interview_completes_after_question_budget():
     await session.run(ws)
 
     assert ws.types() == [
-        "session.ready", "question.text", "turn.complete",
-        "question.text", "turn.complete", "session.end",
+        "session.ready", "question.text", "question.audio_end", "turn.complete",
+        "question.text", "question.audio_end", "turn.complete", "session.end",
     ]
     assert ws.sent[-1]["reason"] == "completed"
     assert ws.closed == (1000, None)
@@ -273,10 +290,11 @@ async def test_spoken_answer_is_transcribed_recorded_and_echoed():
     await session.run(ws)
 
     assert ws.types() == [
-        "session.ready", "question.text", "transcript.final", "turn.complete", "session.end",
+        "session.ready", "question.text", "question.audio_end", "transcript.final",
+        "turn.complete", "session.end",
     ]
     turn_id = ws.sent[1]["turn_id"]
-    assert ws.sent[2] == {"type": "transcript.final", "turn_id": turn_id, "text": "I used asyncpg"}
+    assert ws.sent[3] == {"type": "transcript.final", "turn_id": turn_id, "text": "I used asyncpg"}
     # Frames were joined into one answer, and the question was the prompt.
     assert transcriber.calls == [(PCM + PCM, "Q1?")]
     row = p["turns"].rows[turn_id]
@@ -336,3 +354,33 @@ async def test_stt_failure_is_interrupted():
     assert event_type == "interview.interrupted"
     assert "groq 503" in message
     assert ws.closed[0] == 1011
+
+
+# --- Spoken questions (decision 044) ------------------------------------------
+
+
+async def test_question_audio_streams_between_text_and_audio_end():
+    synth = FakeSynthesizer()
+    session, p = make(synthesizer=synth, max_questions=1)
+    ws = FakeSocket(START, answer("a"))
+
+    await session.run(ws)
+
+    assert synth.texts == ["Q1?"]
+    assert ws.audio_out == [b"aud1-Q1?", b"aud2"]
+    turn_id = ws.sent[1]["turn_id"]
+    assert ws.sent[2] == {"type": "question.audio_end", "turn_id": turn_id}
+    assert {"tts_first_byte_ms", "tts_ms"} <= p["turns"].rows[turn_id]["timings"].keys()
+
+
+async def test_tts_failure_is_interrupted_with_question_on_record():
+    session, p = make(synthesizer=FakeSynthesizer(fail=True))
+    ws = FakeSocket(START)
+
+    await session.run(ws)
+
+    (_, event_type, message), = p["core"].events
+    assert event_type == "interview.interrupted"
+    assert "deepgram 402" in message
+    assert ws.closed[0] == 1011
+    assert [r["q"] for r in p["turns"].rows.values()] == ["Q1?"]

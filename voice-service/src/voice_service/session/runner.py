@@ -1,7 +1,8 @@
-"""The interview loop for one WebSocket connection (decisions 034–036, 039–042).
+"""The interview loop for one WebSocket connection (decisions 034–036, 039–045).
 
-    session.start ─▶ consume token ─▶ [retrieve ─▶ LLM ─▶ persist ─▶ ask
-                                        ◀── answer.text ── persist] × N ─▶ end event
+    session.start ─▶ consume token ─▶ [retrieve ─▶ LLM ─▶ persist ─▶ ask (text + TTS audio)
+                                        ◀── audio frames ─ audio.end ─▶ STT ─▶ persist] × N
+                                     ─▶ end event
 
 Collaborators are injected so tests can run the whole loop with fakes:
 no network, no database, no LLM.
@@ -13,6 +14,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -78,6 +80,10 @@ class Transcriber(Protocol):
     async def transcribe(self, pcm: bytes, *, prompt: str) -> str: ...
 
 
+class Synthesizer(Protocol):
+    def synthesize(self, text: str) -> AsyncIterator[bytes]: ...
+
+
 class Turns(Protocol):
     async def create_turn(
         self,
@@ -117,6 +123,7 @@ class InterviewSession:
         retriever: Retriever,
         generator: Generator,
         transcriber: Transcriber,
+        synthesizer: Synthesizer,
         turns: Turns,
         config: SessionConfig,
     ) -> None:
@@ -124,6 +131,7 @@ class InterviewSession:
         self._retriever = retriever
         self._generator = generator
         self._transcriber = transcriber
+        self._synthesizer = synthesizer
         self._turns = turns
         self._config = config
 
@@ -237,9 +245,17 @@ class InterviewSession:
                 len(chunk_ids),
             )
 
+            # 4. Ask: the text first (captions), then the spoken question.
             await ws.send_json(protocol.question_text(turn_id, seq, question))
+            tts_timings = await self._speak(ws, turn_id, question)
+            await self._turns.add_timings(turn_id, tts_timings)
+            logger.info(
+                "interview %s turn %s: tts_first_byte=%sms tts=%sms",
+                session.interview_id, seq,
+                tts_timings["tts_first_byte_ms"], tts_timings["tts_ms"],
+            )
 
-            # 4. Wait for the answer (or the client ending the session).
+            # 5. Wait for the answer (or the client ending the session).
             reply = await self._await_answer(ws, question)
             if isinstance(reply, SessionEnd):
                 return "ended_by_client"
@@ -259,6 +275,24 @@ class InterviewSession:
             query = f"{question}\n{reply.text}"  # decision 042
 
         return "completed"
+
+    async def _speak(self, ws: Channel, turn_id: int, question: str) -> dict[str, int]:
+        """Stream the question's audio to the client as binary frames.
+
+        Each chunk is forwarded the moment it arrives, so playback starts
+        before synthesis ends. `send_bytes` waits while the socket's send
+        buffer is full, which paces us to the client's network speed
+        (backpressure) instead of piling audio up in memory.
+        """
+        t0 = time.perf_counter()
+        first_byte: float | None = None
+        async for chunk in self._synthesizer.synthesize(question):
+            if first_byte is None:
+                first_byte = time.perf_counter()
+            await ws.send_bytes(chunk)
+        end = time.perf_counter()
+        await ws.send_json(protocol.question_audio_end(turn_id))
+        return {"tts_first_byte_ms": _ms(t0, first_byte or end), "tts_ms": _ms(t0, end)}
 
     async def _await_answer(self, ws: Channel, question: str) -> _Answer | SessionEnd:
         """The next answer, spoken or typed, or session.end.
