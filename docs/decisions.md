@@ -1912,3 +1912,217 @@ Remaining imperfections: an occasional "…and…" double question, and a
 - Replies regularly break the length or one-question rules: enforce in
   code (reject and regenerate).
 - More than one interview runs at a time: the rate limit above.
+
+
+---
+
+## 049 — Evaluation Service contract: Core API triggers, Evaluation pulls over HTTP
+
+**Decision:**
+When Core API applies an `interview.completed` or `interview.interrupted`
+event (decision 036), it asks Evaluation Service for a report:
+
+    POST /internal/v1/reports                      (HMAC-signed, decision 027)
+    body: { interview_id, repository_id, outcome: "completed" | "interrupted" }
+    → 202 Accepted
+
+Evaluation Service then gathers its inputs over HTTP. It never reads
+another service's tables (decision 021):
+
+    Voice Service       GET  /internal/v1/interviews/{interview_id}/turns
+                        → 200 { turns: [ { seq, question_text, answer_text,
+                                           status, retrieved_chunk_ids } ] }
+    Repository Service  POST /internal/v1/repositories/{repository_id}/chunks
+                        body: { ids: int[] }   (1–200 ids)
+                        → 200 { chunks: [ same shape as /retrieve, no similarity ] }
+
+The report is stored in Evaluation's own `reports` table, one row per
+interview (`interview_id` UNIQUE). Its `status` is `generating`, `ready`
+or `failed`. Core API keeps no report metadata. It serves reports to the
+frontend by proxying:
+
+    Frontend → Core API     GET /v1/interviews/{id}/report   (session cookie, owner only)
+    Core API → Evaluation   GET /internal/v1/reports/{interview_id}
+                            → 200 { status, partial, summary, turn_evaluations, ... }
+                            → 404 no report
+
+Core API answers 200 with the report when it is `ready` or `failed`, 202
+while it is `generating`, and 404 when the interview has not ended.
+
+Trigger rules:
+- A trigger for a report that is `ready` or `generating` is a no-op.
+- A trigger for a `failed` report regenerates it.
+- Generation runs on FastAPI `BackgroundTasks`, like ingestion.
+
+Two recovery paths, so a lost call delays a report but never loses it:
+- **Lazy re-trigger.** If Core API's report proxy gets a 404 for an
+  interview that is `completed` or `interrupted`, it sends the trigger
+  again and answers 202.
+- **Startup resume.** On boot, Evaluation re-schedules every report
+  still in `generating`.
+
+**Why:**
+- **Core API triggers, not Voice Service.** Core API owns the interview
+  lifecycle and already knows `repository_id` and the outcome when it
+  applies the end event. Voice Service would have to send a second call
+  at session end, the moment it is most likely to be failing.
+- **HTTP, not a broker.** The rest of the system already uses
+  HMAC-signed HTTP for every internal call (decisions 027, 029, 035). A
+  report needs about five calls, and the work is in the background, so
+  hop latency doesn't matter. A broker is infrastructure `requirements.md`
+  lists as out of scope, and none of decision 029's triggers for one
+  apply yet.
+- **Pull, not push.** Turns and chunks are already persisted by their
+  owners. Fetching them at generation time means the trigger can be
+  sent again at any point and still produce the same report.
+- **Chunks by id, not re-retrieval.** `turns.retrieved_chunk_ids`
+  (decision 040) records the exact code each question was generated
+  from. Grading against the same code is fairer than searching again.
+- **No report metadata in Core API.** Evaluation already holds the
+  status. Copying it into Core API would need a callback and a second
+  source of truth for one field.
+- **The two recovery paths** cover the weak spots of fire-and-forget
+  HTTP: Evaluation down when the trigger is sent, and a crash or
+  `--reload` mid-generation. Both are cheap because the `reports` row is
+  written before the work starts, so the table doubles as a durable job
+  list.
+
+**Tradeoff:**
+- Evaluation depends on Voice and Repository being up while it
+  generates. If either is down the report is `failed`, and recovers on
+  the next trigger.
+- A `failed` report is served as is. It is regenerated only when a
+  trigger arrives, not when it is read.
+- Core API can't list interviews with their report status without one
+  call per interview. Acceptable while no screen needs that list.
+- An interview stuck in `active` (decision 036) gets no trigger and no
+  report until it is ended.
+
+**Revisit when:**
+- Reports sit in `generating` for a long time under load, or several
+  must run in parallel with controlled concurrency: move to a
+  Postgres-backed job table with workers before considering a broker.
+- A second service needs to react to "interview ended" (decision 029's
+  second-consumer trigger).
+- The frontend needs report status in interview lists.
+
+---
+
+## 050 — Report shape: per-turn grading on two 1–5 scores, grounded in the turn's code
+
+**Decision:**
+**Per turn.** Each answered turn is graded in its own LLM call. The call
+gets the question, the answer, the previous exchange for context, and
+the code chunks the question was generated from. The model returns JSON,
+validated with pydantic:
+
+    {
+      correctness:        { score: 1–5, justification },
+      clarity:            { score: 1–5, justification },
+      strengths:          [string],
+      gaps:               [string],
+      key_points:         [ { point, chunk_ids: [int] } ],   // 2–4
+      evidence_chunk_ids: [int]
+    }
+
+- **Correctness** means the answer is true of *this* code, not of
+  software in general.
+- **Clarity** means structure, precision, and whether the answer
+  responds to the question that was asked.
+- **Key points** are what a strong answer would have covered. They are
+  the practice value of the report.
+
+**Grounding rules, enforced in code:**
+- Chunk ids not among the turn's chunks are dropped.
+- A key point with no valid chunk id left is dropped.
+- Invalid JSON gets one retry. After that the turn is `not_graded`, and
+  the rest of the report is still produced.
+
+**Summary.** One last LLM call reads the per-turn results and writes
+2–3 strengths, 2–3 areas to improve, and the files worth revisiting.
+The numbers are computed in code: average correctness, average clarity,
+turns answered and turns asked.
+
+**Partial interviews (decision 008):**
+- Turns still `asked` are listed as `not_answered` and left out of the
+  averages.
+- `partial` is true when the outcome was `interrupted`.
+- With no answered turns, the report is still produced, with no scores.
+
+Each report stores the `model` and a `prompt_version`, so scores from
+different prompts are never compared by mistake.
+
+**Why:**
+- `requirements.md` names the two dimensions: technical correctness and
+  explanation quality. They can disagree (a clear answer that is wrong,
+  or a right answer that rambles), so they are scored separately.
+- **1–5, not 0–100.** LLM judges are more consistent on small scales,
+  and each score comes with a justification the candidate can check.
+- **Per turn, not one call for the whole transcript.** Each call sees
+  only the code that matters for that question, which keeps grading
+  grounded and the prompt small. One bad response costs one turn, not
+  the report.
+- **Averages in code.** An LLM's arithmetic and its idea of "overall"
+  drift. Code doesn't.
+- **Citations checked in code.** `requirements.md` asks for evaluations
+  grounded in the repository. Checking that every cited chunk was
+  actually shown to the model is the cheapest guard against invented
+  claims about the code.
+
+**Tradeoff:**
+- About seven LLM calls per report instead of one, which is slower
+  under the free-tier rate limit (decision 051).
+- The judge only sees the chunks the question was built from. An answer
+  that is correct about code outside those chunks can be under-scored.
+- A dropped key point is silent to the candidate. The count of dropped
+  citations is logged so it can be watched.
+
+**Revisit when:**
+- Candidates often dispute correctness scores about code outside the
+  turn's chunks: add a retrieval on the answer itself.
+- Scores for the same answer vary a lot between runs: lower the
+  temperature, or grade twice and average.
+- A third dimension is asked for (for example depth, or tradeoff
+  awareness).
+
+---
+
+## 051 — Evaluation model: GPT-OSS 120B on Groq, separate from the question model
+
+**Decision:**
+Evaluation Service calls `groq/openai/gpt-oss-120b` through litellm, with
+low reasoning effort and JSON output. The name is a config value,
+`EVAL_LLM_MODEL`, separate from Voice Service's `LLM_MODEL`
+(`qwen/qwen3.8-27b`, decision 046). Calls run one after another, with
+retry and exponential back-off on HTTP 429.
+
+**Why:**
+- **A separate model is a separate rate-limit bucket.** Groq's free tier
+  gives each chat model about 8,000 tokens per minute and 1,000 requests
+  per day (all three candidates checked through response headers on
+  2026-10-08). Grading on the question model would take tokens from
+  live interviews, where latency matters (decision 006).
+- **A stronger judge than the question model.** Grading has to check an
+  answer against code and explain its reasoning. That is harder than
+  writing a 35-word question, and speed doesn't matter in the
+  background.
+- Of the chat models on Groq (`gpt-oss-120b`, `gpt-oss-20b`,
+  `qwen3.8-27b`, `allam-2-7b`), the 120B model is the largest. It has a
+  131k context window and supports JSON output.
+
+**Tradeoff:**
+- Reasoning tokens count against the 8k-per-minute limit. A grading
+  call is about 3k tokens, so a six-turn report takes roughly 2–4
+  minutes. That is fine in the background, but it means one report at
+  a time.
+- Chosen on paper. Grading quality is checked with the sanity set
+  (strong, vague and wrong answers to real questions from interviews 7
+  and 8) when the grader is built, and recorded here.
+- Same single-provider risk as decision 046: Groq can retire the model.
+  The name is in config.
+
+**Revisit when:**
+- The sanity set doesn't rank strong > vague > wrong on correctness.
+- Reports take long enough that users notice, or several must run at
+  once: a paid tier, or a smaller prompt.
+- Groq retires the model.

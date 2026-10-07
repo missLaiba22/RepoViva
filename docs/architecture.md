@@ -25,7 +25,7 @@ flowchart TB
 
     subgraph "External Providers"
         GH[GitHub<br/>OAuth + Repos]
-        LLM[LLM Provider<br/>Groq for questions]
+        LLM[LLM Provider<br/>Groq: questions + grading]
         STT[STT Provider<br/>Groq Whisper]
         TTS[TTS Provider<br/>Deepgram Aura-2]
     end
@@ -35,7 +35,9 @@ flowchart TB
 
     CORE -- trigger ingest --> REPO
     REPO -- status callback --> CORE
-    CORE -. trigger report .-> EVAL
+    CORE -. trigger report<br/>read report .-> EVAL
+    EVAL -. fetch turns .-> VOICE
+    EVAL -. fetch chunks by id .-> REPO
     VOICE -- retrieval query --> REPO
     VOICE -- consume token<br/>end-of-session event --> CORE
 
@@ -53,7 +55,7 @@ flowchart TB
     EVAL -. generate .-> LLM
 ```
 
-*Dashed arrows are designed but not yet implemented: report generation (Evaluation Service).*
+*Dashed arrows are designed but not yet implemented: report generation (Evaluation Service, decisions 049–051).*
 
 ## Components
 
@@ -65,7 +67,7 @@ Main REST entry point for the frontend. Owns:
 - User records
 - Repository metadata (with ingestion status)
 - Interview metadata (creation, listing, session token issuance and consumption)
-- Report metadata (listing, retrieval — actual generation delegated to Evaluation Service)
+- Report access for the frontend: checks ownership, then proxies to Evaluation Service, which owns the report and its status (decision 049)
 
 Delegates:
 
@@ -96,13 +98,16 @@ Owns the live interview session:
 
 ### Evaluation Service
 
-Given a completed interview transcript, generates the final report:
+Generates the end-of-interview report (decisions 049–051):
 
-- Called by Core API when an interview ends (or on partial-report request)
-- Calls the LLM provider for report generation
-- Writes the report to the shared database
+- Triggered by Core API when an interview ends, `completed` or `interrupted`. Generation runs in the background
+- Fetches the turns from Voice Service and the exact code chunks each question came from (`retrieved_chunk_ids`) from Repository Service, over HMAC-signed HTTP
+- Grades each answered turn in its own LLM call: correctness and clarity on 1–5, strengths, gaps, and 2–4 key points of a strong answer, each citing the turn's chunks. Citations are checked in code (decision 050)
+- Writes a summary. Averages are computed in code, the prose by one more LLM call
+- Stores the report in its own `reports` table and serves it to Core API
+- An interrupted interview gets a partial report: unanswered turns are listed, not scored (decision 008)
 
-Kept separate so report generation (potentially slow, batchable) does not compete with live-session latency.
+Kept separate so report generation (slow, rate-limited) does not compete with live-session latency.
 
 ### PostgreSQL (shared, with pgvector)
 
@@ -143,7 +148,8 @@ POST /v1/interviews              body: { repository_id }  → Interview + sessio
                                  The raw token appears ONLY in this response (decision 035)
 GET  /v1/interviews              list current user's interviews, newest first            [implemented]
 GET  /v1/interviews/{id}         single interview; 404 if missing or not yours           [implemented]
-GET  /v1/interviews/{id}/report  the report                                              [planned]
+GET  /v1/interviews/{id}/report  the report: 200 ready/failed, 202 generating,          [planned]
+                                 404 if missing, not yours or not ended (decision 049)
 ```
 
 The current user is always derived from the auth token, never from request bodies.
@@ -247,11 +253,32 @@ retry, like ingestion events.
 
 **Planned:**
 
-Core API → Evaluation Service (report generation)
+Decision 049 has the full contract and recovery rules.
+
+Core API → Evaluation Service (report trigger and read)
 ```
 POST /internal/v1/reports
+body: { interview_id, repository_id, outcome: "completed" | "interrupted" }
+→ 202  (no-op if the report is ready or generating; regenerates a failed one)
+
+GET  /internal/v1/reports/{interview_id}
+→ 200 { status: "generating" | "ready" | "failed", partial, summary,
+        turn_evaluations, model, prompt_version, error_message }
+→ 404 no report
 ```
-Generates a report for a completed (or partial) interview. Detailed shape TBD.
+
+Evaluation Service → Voice Service (turns)
+```
+GET /internal/v1/interviews/{interview_id}/turns
+→ 200 { turns: [ { seq, question_text, answer_text, status, retrieved_chunk_ids } ] }
+```
+
+Evaluation Service → Repository Service (chunks by id)
+```
+POST /internal/v1/repositories/{repository_id}/chunks
+body: { ids: int[] }   // 1–200
+→ 200 { chunks: [ { id, content, filename, start_line, end_line, language } ] }
+```
 
 ### WebSocket — served by Voice Service
 
@@ -345,15 +372,25 @@ see decision 031 for why that split exists and what it fixed.
 4. **Opening turn:** retrieve with the fixed seed query (decision 042) → generate the question with Groq (decisions 034, 038) → insert the turn as `asked` → send `question.text` → stream the question's audio from Deepgram as binary frames, then `question.audio_end` (decision 044).
 5. The user answers. The client streams microphone audio as binary frames and sends `audio.end` when the user stops. Voice Service compresses the buffered audio to MP3 (decision 047) and transcribes it with Groq Whisper, using the question as prompt (decision 043), sends `transcript.final`, records the answer (turn → `answered`) and sends `turn.complete`. Silence or an over-long answer gets an `error` and the turn waits for another try.
 6. **Follow-up turns:** retrieve with the previous question plus the answer, excluding every chunk already used → generate with the full history → ask. Repeat until `MAX_QUESTIONS` (default 6) or the client sends `session.end`.
-7. On session end, Voice Service reports `interview.completed` (budget reached or user stopped) or `interview.interrupted` (disconnect or error) to Core API (decisions 036, 041). Which service triggers report generation is decided when Evaluation Service is built.
+7. On session end, Voice Service reports `interview.completed` (budget reached or user stopped) or `interview.interrupted` (disconnect or error) to Core API (decisions 036, 041). Core API then triggers the report (see below).
 
 Each turn's `timings` records `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tts_ms` and `stt_ms`, and the same values are logged. Together they cover decision 006's latency path, from the end of the user's speech (STT) to the next question's audio starting (retrieval, LLM, TTS first byte).
+
+### Report generation (planned — decisions 049–051)
+
+1. Core API applies the end event, then sends `POST /internal/v1/reports` to Evaluation Service. Best-effort, no retry.
+2. Evaluation Service upserts the `reports` row as `generating`, returns 202, and runs the pipeline in the background.
+3. It fetches the turns from Voice Service and their chunks from Repository Service.
+4. It grades each answered turn with `gpt-oss-120b` on Groq, one call at a time with back-off on 429, then writes the summary. Status becomes `ready`, or `failed` with `error_message`.
+5. The client polls `GET /v1/interviews/{id}/report` on Core API, which checks ownership and proxies to Evaluation Service.
+
+Recovery: if the trigger was lost, the first read gets a 404 from Evaluation, so Core API re-sends the trigger and answers 202. On startup, Evaluation resumes every report still `generating`.
 
 ## Data Storage
 
 - **PostgreSQL (shared, with pgvector)** — one database, per-service schemas:
    - Core API schema: users, repositories (metadata + status),
-    interviews, encrypted OAuth tokens, reports (metadata).
+    interviews, encrypted OAuth tokens. No report data (decision 049).
     *A table for processed inbound event IDs may be added later
     if decision 029 is revisited and dedup becomes necessary.*
   - Repository Service schema: `code_chunks` (chunk text + Voyage
@@ -370,7 +407,11 @@ Each turn's `timings` records `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tt
     `timings`, and has no foreign key to `interviews`. DDL lives in
     `voice-service/sql/schema.sql` and is applied at startup. *Also in
     `public` for now, like `code_chunks`.*
-  - Evaluation Service schema: report content.
+  - Evaluation Service schema: `reports`, one row per interview
+    (`interview_id` UNIQUE, no foreign key), with `status`, `partial`,
+    `model`, `prompt_version`, and `summary` and `turn_evaluations` as
+    JSONB (decisions 049, 050). DDL in `evaluation-service/sql/schema.sql`,
+    applied at startup.
 - **No raw audio storage** — audio is discarded after transcription.
  
 
@@ -393,7 +434,6 @@ Each turn's `timings` records `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tt
 
 Open decisions that will shape architecture:
 
-- LLM for Evaluation Service reports (may differ from the question model)
 - Choice of background job system inside Repository Service. Real ingestion (clone → chunk → embed via CocoIndex, decisions 030–031) currently runs on FastAPI `BackgroundTasks`; revisit if concurrency, retries, or observability needs outgrow that.
 - Whether to move off HTTP callbacks (decisions 024–026, 029) to a message broker — decision 029 names the revisit triggers (callback drop rate, event volume growth, a second event consumer)
 - Choice of managed Postgres provider (Supabase or Neon)
