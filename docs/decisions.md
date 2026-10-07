@@ -1842,3 +1842,73 @@ which sent a WAV.
 **Revisit when:**
 - The frontend exists: compress on the client instead (see above).
 - `stt_ms` still takes a large share of the turn budget: streaming STT.
+
+
+---
+
+## 048 — Scenario-based questions; code is background, not the subject
+
+**Decision:**
+The interviewer prompt (`voice-service/src/voice_service/llm/prompts.py`)
+changes from code-pointed questions to scenario-based ones. Retrieved
+code is still sent to the model, labelled as *background*, so questions
+stay grounded in the candidate's real project (decision 013). Questions
+now describe a situation the project faces in plain product and system
+terms ("two customers buy the last item at once", "the payment webhook
+is delayed by hours") and ask how it behaves or how the candidate would
+handle it. The model is told never to name files, functions, classes or
+variables.
+
+Also changed:
+- **No judgement of the previous answer** ("that was vague"). At most a
+  neutral lead-in such as "Okay."
+- **"I don't know" or "answer it for me"** gets a one-sentence hint and
+  an easier question, or a new situation. Never the full answer, never
+  the same question repeated.
+- **One question per reply**, at most two sentences and 35 words. It is
+  heard once and can't be re-read.
+- The opening question is an easy warm-up.
+
+**Why:**
+- After interviews 7 and 8, the candidate found the questions too hard
+  and too code-specific ("In the `include_object` hook, you check if
+  `compare_to is None`…"). That came straight from the old prompt's rule
+  "name the specific file, function, class". Recalling identifiers by
+  voice tests memory of the code more than understanding of the system.
+- Real interviews about your own project mostly ask how the system
+  behaves in situations and why it was built that way. Scenarios test the
+  same understanding without needing to remember identifiers.
+- Transcripts showed the old follow-ups pressing harder after "I don't
+  know" and "can you simplify" (repeating the question, "I need you to
+  directly answer"), questions of 40–52 words, and two questions stacked
+  in one reply.
+
+**How it was checked:**
+Interviews 7 and 8 were replayed turn by turn with the new prompt, using
+the same history and the same retrieval queries. Openings and topic
+changes turned into situations in 23–35 words with no identifiers, and
+were grounded in real features (the repository's chatbot, its promotions
+system). A first version still gave the full answer when asked to, judged
+an answer, and ran long. The rules above fixed those on re-test.
+Remaining imperfections: an occasional "…and…" double question, and a
+"simplified" follow-up that still ran 41 words.
+
+**Tradeoff:**
+- Questions are less precise about specific code, so a candidate can
+  answer well without knowing implementation details. That is accepted:
+  RepoViva is practice for explaining a project.
+- Instruction following is imperfect: length and one-question rules are
+  usually but not always kept. Not enforced in code.
+- **Rate limits found while testing:** Groq's free tier for
+  `qwen/qwen3.8-27b` allows about 8,000 tokens per minute and 1,000
+  requests per day. A question prompt is about 2,000 tokens, so that is
+  3–4 questions per minute across all users. One interview at a time
+  fits. The ~10 concurrent interviews target (architecture.md) does not, so a paid tier
+  or a smaller prompt is needed before multi-user demos.
+
+**Revisit when:**
+- Candidates find questions too easy or too generic: add a difficulty
+  setting (scenario-only vs scenario plus code detail).
+- Replies regularly break the length or one-question rules: enforce in
+  code (reject and regenerate).
+- More than one interview runs at a time: the rate limit above.
