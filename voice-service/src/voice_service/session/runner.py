@@ -43,10 +43,16 @@ Outcome = Literal["completed", "ended_by_client"]
 
 
 class Channel(Protocol):
-    """The subset of fastapi.WebSocket the runner uses."""
+    """The subset of fastapi.WebSocket the runner uses.
 
-    async def receive_text(self) -> str: ...
+    `receive()` returns the raw ASGI message rather than `receive_text()`,
+    because a client frame may be text (JSON control messages) or binary
+    (audio, decision 045), and only the message says which.
+    """
+
+    async def receive(self) -> dict: ...
     async def send_json(self, data: dict) -> None: ...
+    async def send_bytes(self, data: bytes) -> None: ...
     async def close(self, code: int = 1000, reason: str | None = None) -> None: ...
 
 
@@ -144,7 +150,7 @@ class InterviewSession:
     async def _admit(self, ws: Channel) -> ConsumedSession | None:
         """Wait for session.start and consume its token. None = closed."""
         try:
-            raw = await asyncio.wait_for(ws.receive_text(), self._config.session_start_timeout_s)
+            raw = await asyncio.wait_for(_receive(ws), self._config.session_start_timeout_s)
         except TimeoutError:
             logger.info("closing socket: no session.start within timeout")
             await _safe_close(ws, _CLOSE_POLICY_VIOLATION, _GENERIC_ADMISSION_FAILURE)
@@ -152,10 +158,10 @@ class InterviewSession:
         except WebSocketDisconnect:
             return None
 
-        try:
-            msg = protocol.parse_client_message(raw)
-        except ValidationError:
-            msg = None
+        msg = None
+        if isinstance(raw, str):  # a binary first frame is never session.start
+            with contextlib.suppress(ValidationError):
+                msg = protocol.parse_client_message(raw)
         if not isinstance(msg, SessionStart):
             logger.info("closing socket: first message was not a valid session.start")
             await _safe_close(ws, _CLOSE_POLICY_VIOLATION, _GENERIC_ADMISSION_FAILURE)
@@ -234,7 +240,10 @@ class InterviewSession:
     async def _await_answer(self, ws: Channel) -> AnswerText | SessionEnd:
         """Next answer.text or session.end; protocol mistakes get an error and a retry."""
         while True:
-            raw = await ws.receive_text()
+            raw = await _receive(ws)
+            if isinstance(raw, bytes):
+                await ws.send_json(protocol.error("bad_message", "expected answer.text or session.end"))
+                continue
             try:
                 msg = protocol.parse_client_message(raw)
             except ValidationError:
@@ -243,6 +252,20 @@ class InterviewSession:
             if isinstance(msg, (AnswerText, SessionEnd)):
                 return msg
             await ws.send_json(protocol.error("bad_message", "session already started"))
+
+
+async def _receive(ws: Channel) -> str | bytes:
+    """Next client frame: text or binary.
+
+    A raw ASGI disconnect is a message, not an exception, so raise it the
+    way `receive_text()` would; the runner's handlers stay unchanged.
+    """
+    message = await ws.receive()
+    if message["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", 1000))
+    if message.get("text") is not None:
+        return message["text"]
+    return message.get("bytes") or b""
 
 
 def _ms(start: float, end: float) -> int:

@@ -5,7 +5,6 @@ import json
 
 import httpx
 import pytest
-from fastapi import WebSocketDisconnect
 
 from voice_service.clients.core_api import ConsumedSession, TokenRejectedError
 from voice_service.clients.repository import Chunk
@@ -22,18 +21,24 @@ class FakeSocket:
     def __init__(self, *incoming):
         self._incoming = list(incoming)
         self.sent: list[dict] = []
+        self.audio_out: list[bytes] = []
         self.closed: tuple[int, str | None] | None = None
 
-    async def receive_text(self) -> str:
+    async def receive(self) -> dict:
         if not self._incoming:
             await asyncio.Event().wait()  # never set
         item = self._incoming.pop(0)
         if item is DISCONNECT:
-            raise WebSocketDisconnect(1001)
-        return json.dumps(item)
+            return {"type": "websocket.disconnect", "code": 1001}
+        if isinstance(item, bytes):
+            return {"type": "websocket.receive", "bytes": item}
+        return {"type": "websocket.receive", "text": json.dumps(item)}
 
     async def send_json(self, data):
         self.sent.append(data)
+
+    async def send_bytes(self, data):
+        self.audio_out.append(data)
 
     async def close(self, code=1000, reason=None):
         self.closed = (code, reason)
