@@ -89,8 +89,8 @@ All services must share the same `INTERNAL_HMAC_SECRET`.
 
 ## Project status
 
-Working end to end: GitHub login → submit a repository → background ingestion (clone, chunk, embed) with status callbacks → retrieval over the indexed code → create an interview and receive a single-use session token → the token is consumed through Core API, which starts the interview.
+Working end to end: GitHub login → submit a repository → background ingestion (clone, chunk, embed) with status callbacks → retrieval over the indexed code → create an interview and receive a single-use session token → the token is consumed through Core API, which starts the interview → a spoken interview in Voice Service.
 
-Implemented, tested with fakes, live run pending: the spoken interview in Voice Service. It covers WebSocket admission with the token, code-grounded questions from Groq spoken with Deepgram TTS, answers transcribed with Groq Whisper, persisted turns, and completed/interrupted reported back to Core API. Try it with `voice-service/scripts/interview_cli.py` (microphone and speakers).
+The spoken interview has been run live (interviews 7 and 8, decisions 046–048). It covers WebSocket admission with the token, code-grounded questions from Groq spoken with Deepgram TTS, answers transcribed with Groq Whisper, persisted turns, and completed/interrupted reported back to Core API. Try it with `voice-service/scripts/interview_cli.py` (microphone and speakers). Questions are scenario-based rather than asking for identifiers. Groq's free tier fits one interview at a time; see decision 048 for the rate limit.
 
 Next: Evaluation Service and the frontend.
