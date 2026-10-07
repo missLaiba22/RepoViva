@@ -10,7 +10,7 @@ Runs RepoViva's live interview over a WebSocket, spoken in both directions: ques
   - Each follow-up queries with the previous question plus the answer, excluding chunks already used (decision 042).
 - **Speech.**
   - Each question is sent as text first (captions), then as audio streamed chunk by chunk from Deepgram, then `question.audio_end` (decision 044).
-  - The client streams microphone audio as binary frames and sends `audio.end`. The buffered answer is transcribed in one Groq Whisper call, with the question as prompt so code identifiers come out right (decision 043), and echoed back as `transcript.final`.
+  - The client streams microphone audio as binary frames and sends `audio.end`. The buffered answer is compressed to MP3 (about 10x smaller, decision 047) and transcribed in one Groq Whisper call, with the question as prompt so code identifiers come out right (decision 043), and echoed back as `transcript.final`.
   - Silence gets `no_speech` and an answer over `MAX_ANSWER_SECONDS` gets `answer_too_long`. Either way the turn waits for another try. Audio is never stored (decision 009).
 - **Turns.** Turns are stored in Voice Service's own `turns` table (decision 040). A turn is inserted as `asked` before the question is sent, then marked `answered`. Each turn records its retrieved chunk IDs and per-stage timings: `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tts_ms`, `stt_ms`.
 - **Ending** (decision 041):
@@ -42,7 +42,7 @@ src/voice_service/
   clients/repository.py   retrieve chunks (HMAC)
   llm/prompts.py          interviewer prompt + seed query
   llm/generator.py        question generation via litellm
-  speech/stt.py           PCM → WAV, Groq Whisper transcription
+  speech/stt.py           PCM → MP3, Groq Whisper transcription
   speech/tts.py           Deepgram Aura-2, streamed PCM
 sql/schema.sql            turns DDL, applied at startup
 scripts/interview_cli.py  terminal client: mic in, speakers out

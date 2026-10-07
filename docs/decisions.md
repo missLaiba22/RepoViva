@@ -1787,3 +1787,58 @@ from decision 038 are unchanged; this amends only the model.
 - Groq retires this model, or a call fails with `model_not_found`.
 - Questions from real interviews are judged too long to listen to or
   poorly grounded.
+
+
+---
+
+## 047 — Compress answer audio to MP3 before STT
+
+**Decision:**
+Before the transcription call, Voice Service compresses the buffered
+answer from raw PCM16 to a low-bitrate MP3 (`soundfile`/libsndfile,
+`compression_level=0.9`) and sends it as `answer.mp3`. Encoding runs in a
+worker thread (`asyncio.to_thread`). The client protocol is unchanged:
+clients still send raw PCM (decision 045). This amends decision 043,
+which sent a WAV.
+
+**Why:**
+- The first live interview (interview 7) showed `stt_ms` of 1.7–9.7 s,
+  growing with the length of the recording, not the number of words. Raw
+  PCM is 32 KB per second, so a three-minute answer is about 6 MB, and
+  uploading it from a home connection dominated the STT time.
+- Measured on a 94 s answer, sending the same audio to Groq in each format:
+
+  | Format | Size | Encode | STT | Total |
+  |---|---|---|---|---|
+  | WAV (before) | 3.02 MB | 0 | ~10 s | ~10 s |
+  | FLAC | 1.55 MB | 0.1 s | 4.6 s | 4.7 s |
+  | Opus (OGG) | 0.30 MB | 1.8 s | 1.35 s | 3.2 s |
+  | MP3, level 0.9 | 0.33 MB | 0.4–0.5 s | 1.2 s | ~1.7 s |
+
+  Every compressed transcript matched the WAV transcript (99.6% word
+  similarity), so the lossy codecs cost no accuracy at this bitrate.
+- MP3 gives almost Opus's size at a quarter of the encode time. Upload
+  size, not codec, decided the STT time: MP3 and Opus were within 0.1 s.
+- **Worker thread:** encoding is CPU work. On the event loop it would
+  pause every other interview served by the process for ~0.5 s; in a
+  thread the loop keeps serving them.
+
+**Alternatives considered:**
+- **Compress on the client** (Opus from a browser `MediaRecorder`). Would
+  also shrink the client → Voice upload, but changes protocol v2 and
+  needs a decoder for VAD/inspection later. Revisit with the frontend.
+- **Streaming STT.** Uploads while the candidate speaks, so the wait no
+  longer depends on answer length at all. Larger change; still decision
+  043's revisit path.
+- **Encode incrementally as frames arrive.** Hides the encode time
+  entirely but adds per-session encoder state. Not worth it at ~0.5 s.
+
+**Tradeoff:**
+- A native dependency (`soundfile` bundles libsndfile in its wheels).
+- `stt_ms` now includes the encode time; the encode is logged separately.
+- Vorbis encoding crashed the process during testing (libsndfile). Not
+  used; noted in case a codec change is considered.
+
+**Revisit when:**
+- The frontend exists: compress on the client instead (see above).
+- `stt_ms` still takes a large share of the turn budget: streaming STT.

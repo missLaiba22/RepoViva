@@ -15,6 +15,9 @@ dependencies = [
     "asyncpg>=0.30.0",
     # LLM calls — provider is a config value (decision 038)
     "litellm>=1.101.0",
+    # Compresses answer audio to MP3 before STT upload (decision 047); its
+    # wheels bundle libsndfile, so no system install is needed
+    "soundfile>=0.13",
 ]
 
 [dependency-groups]
