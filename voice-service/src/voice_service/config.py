@@ -19,11 +19,11 @@ class Settings(BaseSettings):
     internal_hmac_secret: str
     database_url: str
 
-    # LLM (decision 038). Passed to litellm explicitly: pydantic-settings
+    # LLM (decisions 038, 046). Passed to litellm explicitly: pydantic-settings
     # reads .env but does not export it to os.environ, where litellm
     # would otherwise look.
     groq_api_key: str
-    llm_model: str = "groq/llama-3.3-70b-versatile"
+    llm_model: str = "groq/qwen/qwen3.8-27b"
 
     # Speech (decisions 043, 044). STT reuses groq_api_key.
     stt_model: str = "groq/whisper-large-v3-turbo"

@@ -67,7 +67,7 @@ Details: [docs/architecture.md](docs/architecture.md). The reasoning behind ever
 - **Database:** PostgreSQL 16 + pgvector (Docker Compose locally)
 - **Ingestion:** CocoIndex (syntax-aware chunking), Voyage `voyage-4-lite` embeddings
 - **Frontend:** React + Vite + TypeScript (planned)
-- **Interview LLM:** Groq `llama-3.3-70b-versatile` via litellm (decision 038)
+- **Interview LLM:** Groq `qwen/qwen3.8-27b` via litellm (decisions 038, 046)
 - **STT:** Groq `whisper-large-v3-turbo` (decision 043)
 - **TTS:** Deepgram Aura-2, streamed (decision 044)
 

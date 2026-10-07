@@ -87,7 +87,7 @@ The runner tests drive the whole loop with fake collaborators: no network, datab
 | `REPOSITORY_SERVICE_BASE_URL` | e.g. `http://localhost:8001` |
 | `INTERNAL_HMAC_SECRET` | Must match the other services (decision 027) |
 | `GROQ_API_KEY` | Free key from console.groq.com |
-| `LLM_MODEL` | litellm model string, default `groq/llama-3.3-70b-versatile` |
+| `LLM_MODEL` | litellm model string, default `groq/qwen/qwen3.8-27b` |
 | `STT_MODEL` | litellm transcription model, default `groq/whisper-large-v3-turbo` |
 | `DEEPGRAM_API_KEY` | Deepgram key for TTS (new accounts get $200 credit) |
 | `TTS_VOICE` | Deepgram voice, default `aura-2-thalia-en` |

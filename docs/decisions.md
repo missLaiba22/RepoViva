@@ -1747,3 +1747,43 @@ is no barge-in.
 **Revisit when:**
 - Upload size matters (mobile networks): switch the client to Opus.
 - Users want to interrupt questions: add barge-in.
+
+
+---
+
+## 046 — Question model: Qwen3.8 27B on Groq (Llama 3.3 retired)
+
+**Decision:**
+`LLM_MODEL` changes from `groq/llama-3.3-70b-versatile` to
+`groq/qwen/qwen3.8-27b`. The provider (Groq) and the call path (litellm)
+from decision 038 are unchanged; this amends only the model.
+
+**Why:**
+- Groq retired `llama-3.3-70b-versatile`. The first live audio-slice run
+  failed at question generation with `model_not_found`, and the model no
+  longer appears in Groq's model list.
+- Of the chat models still on Groq, the candidates were compared on the
+  real interviewer prompt with code retrieved from an indexed repository:
+
+  | Model | Time | Result |
+  |---|---|---|
+  | `openai/gpt-oss-120b`, `max_tokens=200` | 2.1 s | empty: reasoning used the whole budget |
+  | `openai/gpt-oss-120b`, `max_tokens=1000` | 1.8 s | good question, ~340 tokens |
+  | `openai/gpt-oss-20b`, low effort | 1.5 s | acceptable |
+  | `qwen/qwen3.8-27b` | ~0.5 s | specific, code-grounded questions, ~45 tokens |
+
+- Qwen was the fastest by a wide margin and gave the best-grounded
+  questions. That speed matters more now that TTS and STT share the 4–5 s
+  turn budget (decision 006). It also works within the existing
+  `max_tokens=200`.
+
+**Tradeoff:**
+- A model chosen from one comparison on one repository. Question quality
+  should be judged again on real interviews.
+- Groq can retire this model too. The name lives in config, so a
+  replacement is a one-line change, but there is no automatic fallback.
+
+**Revisit when:**
+- Groq retires this model, or a call fails with `model_not_found`.
+- Questions from real interviews are judged too long to listen to or
+  poorly grounded.
