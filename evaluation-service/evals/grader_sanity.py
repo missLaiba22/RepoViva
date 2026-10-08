@@ -16,6 +16,9 @@ Checks, per case and run (decision 050):
 - names   — the wrong answer's gaps mention its actual mistake
             (any of the case's `wrong_mistake_keywords`)
 
+Also counts key points phrased as advice ("should ..."): key points must
+say what the code does, not what it ought to do (decision 050).
+
 Writes every grade to evals/results/ for reading by eye. Golden sets are
 data: never edit answers or keywords after seeing results; add a new
 version instead.
@@ -27,6 +30,7 @@ import argparse
 import asyncio
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +44,7 @@ from evaluation_service.grading.prompts import PROMPT_VERSION
 
 _RESULTS_DIR = Path(__file__).resolve().parent / "results"
 KINDS = ("strong", "vague", "wrong")
+_ADVICE = re.compile(r"\bshould\b", re.IGNORECASE)
 
 
 async def grade_case(case: dict, repo: RepositoryClient, repository_id: int, llm, runs: int):
@@ -60,6 +65,12 @@ async def grade_case(case: dict, repo: RepositoryClient, repository_id: int, llm
             grades[kind] = grade.model_dump() if grade else None
         results.append({"run": run, "grades": grades})
     return results
+
+
+def advice_key_points(grades: dict) -> tuple[int, int]:
+    """(key points phrased as advice, all key points) across one run's grades."""
+    points = [kp["point"] for g in grades.values() if g for kp in g["key_points"]]
+    return sum(bool(_ADVICE.search(p)) for p in points), len(points)
 
 
 def check(case: dict, grades: dict) -> dict[str, bool]:
@@ -101,7 +112,7 @@ def main() -> None:
     model = get_settings().eval_llm_model
     print(f"{golden['name']} · {model} · prompt {PROMPT_VERSION} · {args.runs} run(s)\n")
     print(f"{'case':24} run  strong vague wrong  order strong wrong names")
-    passed = total = 0
+    passed = total = advice = points = 0
     for r in results:
         for run in r["runs"]:
             g = run["grades"]
@@ -113,7 +124,11 @@ def main() -> None:
             print(f"{r['case']:24} {run['run']:>3}  {scores}  {marks}")
             passed += sum(checks.values())
             total += 4
+            a, n = advice_key_points(g)
+            advice += a
+            points += n
     print(f"\n{passed}/{total} checks passed")
+    print(f'{advice}/{points} key points phrased as advice ("should")')
 
     _RESULTS_DIR.mkdir(exist_ok=True)
     out = _RESULTS_DIR / f"{datetime.now(UTC).astimezone().date()}_{golden['name']}_{PROMPT_VERSION}.json"

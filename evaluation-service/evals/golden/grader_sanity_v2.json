@@ -1,0 +1,108 @@
+{
+  "name": "grader_sanity_v2",
+  "description": "v1's two cases unchanged, plus two real questions from the 2026-10-08 live interviews (repository 15). abandoned-checkout-stock: the wrong answer is interview 10's verbatim transcript, which prompt v5 scored 4/5 while its own gap called it inaccurate. chat-db-drop-unseen-code: the excerpts the question was generated from don't include the chat router, so the strong answer (true of the real code) can't be confirmed from them and must not be marked down; key points there must name the gap, not give advice. Answers and keywords were written from the code before any grading run on this set. Same expectations as v1.",
+  "repository_id": 15,
+  "cases": [
+    {
+      "id": "deadlock-lock-order",
+      "source": "interview 7, turn 4",
+      "question": "Why does sorting by product_id before locking prevent deadlocks when two checkouts involve the same two products in different order?",
+      "chunk_ids": [
+        142,
+        244,
+        401,
+        216,
+        402,
+        355
+      ],
+      "answers": {
+        "strong": "In create order I sort the cart items by product ID before taking any locks, and then lock each product row with select for update in that order. Without that, checkout A could lock product one and wait for product two while checkout B holds product two and waits for product one, so each waits on the other forever. With one canonical order both checkouts go for product one first, so the second just waits until the first commits and then carries on. The promo code is always locked after the products, so it keeps the same global order.",
+        "vague": "Sorting just keeps things consistent, so the database doesn't get confused when a lot of people check out at the same time. It's basically a best practice for concurrency and it makes the checkout safer.",
+        "wrong": "Sorting by product ID makes the lookups faster because the database reads the index in order, so locks are held for less time and the two checkouts don't overlap. And we use optimistic locking with a version column anyway, so if both update the same product one of them just retries."
+      },
+      "wrong_mistake_keywords": [
+        "optimistic",
+        "version",
+        "performance",
+        "faster",
+        "speed"
+      ]
+    },
+    {
+      "id": "lost-expiry-webhook",
+      "source": "interview 7, turn 6",
+      "question": "What happens to the decremented stock when the Stripe session times out but the webhook for that expiry is lost or never delivered?",
+      "chunk_ids": [
+        407,
+        353,
+        399,
+        471,
+        465,
+        481
+      ],
+      "answers": {
+        "strong": "Stock is taken when the Stripe checkout session is created, not when payment succeeds. It only comes back when the checkout session expired webhook arrives and mark checkout expired finds a checkout that is still pending; the pending check stops stock being released twice. If that webhook is never delivered, nothing else in the code gives the stock back, there's no background job, so those units stay reserved and the product can look sold out. The fix would be a periodic sweep that expires old pending checkouts.",
+        "vague": "I think the stock would probably be fine. Stripe handles that kind of thing and the system is designed to stay consistent, so it should sort itself out eventually.",
+        "wrong": "Nothing is lost, because we don't decrement stock until the payment succeeds. The decrement happens in the checkout session completed webhook, so if the expiry webhook is lost the stock was never taken in the first place."
+      },
+      "wrong_mistake_keywords": [
+        "creat",
+        "completed",
+        "never taken",
+        "before payment",
+        "at checkout",
+        "session creation"
+      ]
+    },
+    {
+      "id": "abandoned-checkout-stock",
+      "source": "interview 10, turn 4",
+      "question": "That makes sense. Now, when a customer starts checkout, your system immediately reserves stock before they even pay. What happens to that reserved item if the customer abandons the checkout without completing payment?",
+      "chunk_ids": [
+        323,
+        402,
+        467,
+        244,
+        213,
+        461
+      ],
+      "answers": {
+        "strong": "The stock is already gone from the product at that point: create order locks the products, checks stock and decrements stock quantity before the Stripe session is even created. If the customer walks away, those units stay reserved until the Stripe session expires, and only then is the stock given back. The order row exists from the start too, but the artisan never sees it, because their order list joins to the checkout and only shows paid ones. Holding stock that might never sell was a deliberate trade-off in DECISIONS, because reserving only after payment would reopen the oversell race.",
+        "vague": "The system takes care of the reserved stock so it doesn't stay stuck. Stripe and the backend handle that part, so the inventory stays correct in the end.",
+        "wrong": "If the customer abandons the reserved item without completing the payment, it would remain in the reserved item and later on, customer can pay and do the checkout."
+      },
+      "wrong_mistake_keywords": [
+        "expir",
+        "releas",
+        "permanent",
+        "indefinite",
+        "forever"
+      ]
+    },
+    {
+      "id": "chat-db-drop-unseen-code",
+      "source": "interview 11, turn 1",
+      "question": "Imagine a customer is mid-chat with the assistant, and the database connection drops right after their question is sent but before the response starts streaming. How does the chat widget currently handle that disconnect?",
+      "chunk_ids": [
+        225,
+        5,
+        295,
+        268,
+        509,
+        13
+      ],
+      "answers": {
+        "strong": "Each reply runs inside a try block in the chat WebSocket handler. If the database drops, the vector search for the question fails, the exception is caught and logged, and the handler sends an error frame saying something went wrong generating a reply, then keeps the socket open. On the frontend, useChat's error handler swaps the empty assistant bubble for that error message and stays ready, so the user can just send the question again. The user isn't told it was the database, just that the reply failed.",
+        "vague": "It's handled. The chat widget deals with errors so the user isn't left confused, and things go back to normal when the connection comes back.",
+        "wrong": "A database drop can't affect the reply, because the chat doesn't touch the database while answering. The question goes straight to Groq and the answer streams back, so the user wouldn't notice anything."
+      },
+      "wrong_mistake_keywords": [
+        "vector",
+        "pgvector",
+        "embedding",
+        "retriev",
+        "search"
+      ]
+    }
+  ]
+}
