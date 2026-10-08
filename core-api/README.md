@@ -60,7 +60,8 @@ uv run pytest
 | `GITHUB_OAUTH_REDIRECT_URI` | `http://localhost:8000/v1/auth/github/callback` locally |
 | `COOKIE_SECRET` | Signs state and session cookies |
 | `TOKEN_ENCRYPTION_KEY` | Encrypts stored GitHub tokens |
-| `REPOSITORY_SERVICE_BASE_URL` | e.g. `http://localhost:8001` |
+| `REPOSITORY_SERVICE_BASE_URL` | e.g. `http://127.0.0.1:8001` |
+| `EVALUATION_SERVICE_BASE_URL` | Report trigger and report reads, e.g. `http://127.0.0.1:8003` |
 | `INTERNAL_HMAC_SECRET` | Must match Repository Service's (decision 027) |
 | `SESSION_TOKEN_TTL_MINUTES` | Interview token lifetime if unused (default 5) |
 

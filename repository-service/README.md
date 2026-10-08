@@ -44,7 +44,7 @@ Retrieval quality is measured separately. See [evals/README.md](evals/README.md)
 | Variable | Purpose |
 |---|---|
 | `ENV` | `development` or `production` |
-| `CORE_API_BASE_URL` | Where status callbacks are sent, e.g. `http://localhost:8000` |
+| `CORE_API_BASE_URL` | Where status callbacks are sent, e.g. `http://127.0.0.1:8000` |
 | `INTERNAL_HMAC_SECRET` | Must match Core API's |
 | `DATABASE_URL` | Plain `postgresql://...` (asyncpg doesn't accept `+psycopg`) |
 | `VOYAGE_API_KEY` | Embeddings |

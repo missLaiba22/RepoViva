@@ -2,7 +2,7 @@
 
 Stands in for the frontend until it exists:
 
-    uv run python scripts/interview_cli.py <session_token> [ws://localhost:8002/v1/ws/interview]
+    uv run python scripts/interview_cli.py <session_token> [ws://127.0.0.1:8002/v1/ws/interview]
 
 Get a token from Core API's POST /v1/interviews. Each question is printed
 and played through your speakers. When it finishes:
@@ -166,5 +166,5 @@ async def main(token: str, url: str) -> None:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    url = sys.argv[2] if len(sys.argv) > 2 else "ws://localhost:8002/v1/ws/interview"
+    url = sys.argv[2] if len(sys.argv) > 2 else "ws://127.0.0.1:8002/v1/ws/interview"
     asyncio.run(main(sys.argv[1], url))

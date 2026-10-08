@@ -5,7 +5,7 @@ running, and a GROQ_API_KEY in .env.
 
 Usage:
     uv run python scripts/eval_report.py <interview_id> <repository_id> [--partial] [--json out.json]
-    uv run python scripts/eval_report.py 7 15 --voice http://localhost:8102 --repo http://localhost:8101
+    uv run python scripts/eval_report.py 7 15 --voice http://127.0.0.1:8102 --repo http://127.0.0.1:8101
 """
 
 from __future__ import annotations

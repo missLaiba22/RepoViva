@@ -83,8 +83,8 @@ The runner tests drive the whole loop with fake collaborators: no network, datab
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | `postgresql://...` (asyncpg scheme) |
-| `CORE_API_BASE_URL` | e.g. `http://localhost:8000` |
-| `REPOSITORY_SERVICE_BASE_URL` | e.g. `http://localhost:8001` |
+| `CORE_API_BASE_URL` | e.g. `http://127.0.0.1:8000` |
+| `REPOSITORY_SERVICE_BASE_URL` | e.g. `http://127.0.0.1:8001` |
 | `INTERNAL_HMAC_SECRET` | Must match the other services (decision 027) |
 | `GROQ_API_KEY` | Free key from console.groq.com |
 | `LLM_MODEL` | litellm model string, default `groq/qwen/qwen3.8-27b` |
