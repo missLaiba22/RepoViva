@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from evaluation_service.clients.repository import Chunk
 from evaluation_service.clients.voice import Turn
 from evaluation_service.grading.llm import JsonLlm
+from evaluation_service.reports import PendingReport
 
 
 def reply(content: str) -> SimpleNamespace:
@@ -89,3 +90,46 @@ class FakeRepository:
     async def get_chunks(self, repository_id, ids):
         self.requested.append(list(ids))
         return {i: self._chunks[i] for i in ids if i in self._chunks}
+
+
+class FakeReportStore:
+    """In-memory `reports` with the same transitions as ReportStore's SQL."""
+
+    def __init__(self, rows: dict[int, dict] | None = None):
+        self.rows: dict[int, dict] = rows or {}
+
+    async def claim(self, *, interview_id, repository_id, partial):
+        row = self.rows.get(interview_id)
+        if row is not None and row["status"] != "failed":
+            return False
+        self.rows[interview_id] = {
+            "interview_id": interview_id,
+            "repository_id": repository_id,
+            "partial": partial,
+            "status": "generating",
+        }
+        return True
+
+    async def get_status(self, interview_id):
+        row = self.rows.get(interview_id)
+        return row["status"] if row else None
+
+    async def get(self, interview_id):
+        return self.rows.get(interview_id)
+
+    async def mark_ready(self, interview_id, content):
+        row = self.rows[interview_id]
+        if row["status"] == "generating":
+            row.update(status="ready", summary=content.summary, model=content.model)
+
+    async def mark_failed(self, interview_id, error_message):
+        row = self.rows[interview_id]
+        if row["status"] == "generating":
+            row.update(status="failed", error_message=error_message)
+
+    async def list_generating(self):
+        return [
+            PendingReport(r["interview_id"], r["repository_id"], r["partial"])
+            for r in self.rows.values()
+            if r["status"] == "generating"
+        ]

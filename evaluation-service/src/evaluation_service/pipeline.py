@@ -2,7 +2,7 @@
 
 Pure orchestration: the clients and the LLM are passed in, so tests run
 it with fakes. Persisting the result and the report's status belong to
-the caller (reports.py and the internal router).
+the caller (generation.py, reports.py).
 """
 
 from __future__ import annotations
