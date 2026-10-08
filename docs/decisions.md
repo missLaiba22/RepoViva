@@ -579,6 +579,14 @@ actual model choice, cost, and privacy reasoning below are
 unaffected; only the integration mechanism changes, and the "Native
 CocoIndex integration" bullet below is corrected to match.*
 
+*Correction (2026-10-08): query-time embedding happens in Repository
+Service, not Voice Service. Voice Service sends the query as text to
+`POST /internal/v1/repositories/{id}/retrieve`, and the retrieve handler
+embeds it with the same `EMBEDDER` used for indexing (decision 032).
+Voice Service has no Voyage dependency or key. Keeping both embeddings
+in one service means one model setting, so queries and chunks can't be
+embedded by different models by mistake.*
+
 **Why:**
 - **Free allocation suited to development.** Voyage grants every
   account a lifetime 200M free tokens on the voyage-4 generation,
@@ -2165,9 +2173,20 @@ fails at once and a later trigger regenerates it (decision 049).
 **Tradeoff:**
 - About 10 reports a day across all users. Enough for development and a
   demo; not for real use.
-- A daily-limit 429 fails the report instead of waiting hours. It is
-  regenerated on the next trigger, including the lazy re-trigger when
-  the report is read (decision 049).
+- A daily-limit 429 fails the report instead of waiting hours. It stays
+  `failed` until a new trigger arrives. Reading the report doesn't
+  regenerate it: Core API's lazy re-trigger fires only when Evaluation
+  has no report at all (404), and a `failed` report is served as is
+  (decision 049). Today a new trigger has to be sent by hand.
+- The daily limit is a rolling 24-hour window, not a reset at midnight:
+  on 2026-10-08 a run planned on "today's remaining budget" hit
+  `Used 198575` because the previous night's tuning still counted.
+
+*Correction (2026-10-08): this tradeoff first said the lazy re-trigger
+regenerates a failed report when it is read. It doesn't; see the first
+bullet. Making Core API also re-trigger `failed` reports on read would
+close the gap, at the cost of a failing report being retried on every
+read.*
 - Same single-provider risk as decision 046: Groq can retire the model.
   The name is in config.
 

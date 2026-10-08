@@ -35,9 +35,9 @@ flowchart TB
 
     CORE -- trigger ingest --> REPO
     REPO -- status callback --> CORE
-    CORE -. trigger report<br/>read report .-> EVAL
-    EVAL -. fetch turns .-> VOICE
-    EVAL -. fetch chunks by id .-> REPO
+    CORE -- trigger report<br/>read report --> EVAL
+    EVAL -- fetch turns --> VOICE
+    EVAL -- fetch chunks by id --> REPO
     VOICE -- retrieval query --> REPO
     VOICE -- consume token<br/>end-of-session event --> CORE
 
@@ -52,10 +52,10 @@ flowchart TB
     VOICE -- transcribe --> STT
     VOICE -- generate --> LLM
     VOICE -- synthesize --> TTS
-    EVAL -. generate .-> LLM
+    EVAL -- grade --> LLM
 ```
 
-*Dashed arrows are designed but not yet implemented: report generation (Evaluation Service, decisions 049–051).*
+*All arrows are implemented. Report generation (Evaluation Service) was added on 2026-10-08, decisions 049–051.*
 
 ## Components
 
@@ -148,7 +148,7 @@ POST /v1/interviews              body: { repository_id }  → Interview + sessio
                                  The raw token appears ONLY in this response (decision 035)
 GET  /v1/interviews              list current user's interviews, newest first            [implemented]
 GET  /v1/interviews/{id}         single interview; 404 if missing or not yours           [implemented]
-GET  /v1/interviews/{id}/report  the report: 200 ready/failed, 202 generating,          [planned]
+GET  /v1/interviews/{id}/report  the report: 200 ready/failed, 202 generating,          [implemented]
                                  404 if missing, not yours or not ended (decision 049)
 ```
 
@@ -251,15 +251,15 @@ event gets 422. Sets `ended_at`, plus `error_message` (truncated to 1000
 characters) on `interrupted`. Voice Service sends it best-effort, with no
 retry, like ingestion events.
 
-**Planned:**
-
-Decision 049 has the full contract and recovery rules.
+**Implemented (decision 049).** Decision 049 has the full contract and recovery rules.
 
 Core API → Evaluation Service (report trigger and read)
 ```
 POST /internal/v1/reports
 body: { interview_id, repository_id, outcome: "completed" | "interrupted" }
-→ 202  (no-op if the report is ready or generating; regenerates a failed one)
+→ 202 { interview_id, status, scheduled }
+       (no-op if the report is ready or generating; regenerates a failed one;
+        `scheduled` says whether a new run started)
 
 GET  /internal/v1/reports/{interview_id}
 → 200 { status: "generating" | "ready" | "failed", partial, summary,
@@ -376,13 +376,13 @@ see decision 031 for why that split exists and what it fixed.
 
 Each turn's `timings` records `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tts_ms` and `stt_ms`, and the same values are logged. Together they cover decision 006's latency path, from the end of the user's speech (STT) to the next question's audio starting (retrieval, LLM, TTS first byte).
 
-### Report generation (planned — decisions 049–051)
+### Report generation (decisions 049–051)
 
-1. Core API applies the end event, then sends `POST /internal/v1/reports` to Evaluation Service. Best-effort, no retry.
+1. Core API applies the end event, answers Voice Service, then sends `POST /internal/v1/reports` to Evaluation Service in the background. Best-effort, no retry.
 2. Evaluation Service upserts the `reports` row as `generating`, returns 202, and runs the pipeline in the background.
 3. It fetches the turns from Voice Service and their chunks from Repository Service.
 4. It grades each answered turn with `gpt-oss-120b` on Groq, one call at a time with back-off on 429, then writes the summary. Status becomes `ready`, or `failed` with `error_message`.
-5. The client polls `GET /v1/interviews/{id}/report` on Core API, which checks ownership and proxies to Evaluation Service.
+5. The client polls `GET /v1/interviews/{id}/report` on Core API, which checks ownership and proxies to Evaluation Service. Evaluation's `error_message` is not passed on to the client.
 
 Recovery: if the trigger was lost, the first read gets a 404 from Evaluation, so Core API re-sends the trigger and answers 202. On startup, Evaluation resumes every report still `generating`.
 
