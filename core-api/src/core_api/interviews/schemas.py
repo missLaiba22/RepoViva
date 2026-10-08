@@ -42,3 +42,20 @@ class InterviewCreatedResponse(InterviewResponse):
 
     session_token: str
     session_token_expires_at: datetime
+
+class ReportResponse(BaseModel):
+    """GET /v1/interviews/{id}/report (decisions 049, 050).
+
+    Evaluation Service's report, minus its internal error text. While
+    `status` is `generating` (answered 202) the content fields are null.
+    """
+
+    interview_id: int
+    status: str  # generating | ready | failed
+    partial: bool | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+    summary: dict | None = None
+    turn_evaluations: list[dict] | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None

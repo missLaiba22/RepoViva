@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     # Where Repository Service lives — used to fire the ingest trigger.
     repository_service_base_url: str
+    # Where Evaluation Service lives — report trigger and reads (decision 049).
+    evaluation_service_base_url: str
 
     # Shared HMAC secret for signing internal service-to-service calls.
     # Must match repository-service's INTERNAL_HMAC_SECRET.

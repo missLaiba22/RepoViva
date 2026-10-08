@@ -6,13 +6,14 @@ All requests here carry an HMAC signature (decision 027) verified by
 with 401.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from core_api.config import get_settings
 from core_api.db import get_db
 from core_api.interviews import service as interviews_service
+from core_api.interviews.evaluation_client import trigger_report_logged
 from core_api.internal.schemas import (
     IngestionEventBody,
     InterviewEventBody,
@@ -118,6 +119,7 @@ def receive_ingestion_event(
 def receive_interview_event(
     interview_id: int,
     body: InterviewEventBody,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     """Receive an end-of-session event from Voice Service (decision 036).
@@ -125,6 +127,10 @@ def receive_interview_event(
     No retry and no event_id dedup, as with ingestion events (decision
     029). A repeated end event gets 422: the interview is already
     terminal.
+
+    Once the interview has ended, asks Evaluation Service for its report
+    (decision 049). After the response, so Voice Service isn't kept
+    waiting, and a failed trigger doesn't fail the event.
     """
     error_message: str | None = None
     if body.event_type == "interview.interrupted" and body.data is not None:
@@ -151,6 +157,12 @@ def receive_interview_event(
             detail="Interview not found",
         )
 
+    background_tasks.add_task(
+        trigger_report_logged,
+        interview_id=interview.id,
+        repository_id=interview.repository_id,
+        outcome=interview.status,
+    )
     return {"status": "accepted", "interview_id": str(interview_id)}
 
 
