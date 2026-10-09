@@ -174,6 +174,56 @@ def test_evaluation_unavailable_is_503(client, owned, evaluation):
     assert response.status_code == 503
 
 
+# --- POST /v1/interviews/{id}/report/retry ----------------------------------
+
+
+def test_retry_regenerates_a_failed_report(client, owned, evaluation):
+    evaluation.report = {**READY, "status": "failed", "summary": None, "turn_evaluations": None}
+
+    response = client.post("/v1/interviews/7/report/retry")
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "generating"
+    assert evaluation.triggers == [{"interview_id": 7, "repository_id": 15, "outcome": "completed"}]
+
+
+def test_retry_with_no_report_triggers_one(client, owned, evaluation):
+    response = client.post("/v1/interviews/7/report/retry")
+
+    assert response.status_code == 202
+    assert len(evaluation.triggers) == 1
+
+
+def test_retry_leaves_a_ready_report_alone(client, owned, evaluation):
+    evaluation.report = READY
+
+    response = client.post("/v1/interviews/7/report/retry")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert evaluation.triggers == []
+
+
+@pytest.mark.parametrize("status", ["created", "active"])
+def test_retry_before_the_interview_ends_is_404(client, owned, evaluation, status):
+    owned["interview"] = interview(status=status)
+
+    assert client.post("/v1/interviews/7/report/retry").status_code == 404
+    assert evaluation.triggers == []
+
+
+def test_retry_someone_elses_interview_is_404(client, owned, evaluation):
+    owned["interview"] = interview(owner=2)
+
+    assert client.post("/v1/interviews/7/report/retry").status_code == 404
+
+
+def test_retry_with_evaluation_down_is_503(client, owned, evaluation):
+    evaluation.error = "connect failed"
+
+    assert client.post("/v1/interviews/7/report/retry").status_code == 503
+
+
 def test_not_logged_in_is_401(owned, evaluation):
     app.dependency_overrides[get_db] = lambda: None
     try:

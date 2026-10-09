@@ -131,6 +131,7 @@ Auth
 ```
 GET  /v1/auth/github/login       generates state cookie, redirects to GitHub
 GET  /v1/auth/github/callback    validates state, exchanges code, sets session cookie
+POST /v1/auth/github/logout      clears the session cookie (204)
 GET  /v1/me                      returns the current user (requires session cookie)
 ```
 
@@ -150,6 +151,9 @@ GET  /v1/interviews              list current user's interviews, newest first   
 GET  /v1/interviews/{id}         single interview; 404 if missing or not yours           [implemented]
 GET  /v1/interviews/{id}/report  the report: 200 ready/failed, 202 generating,          [implemented]
                                  404 if missing, not yours or not ended (decision 049)
+POST /v1/interviews/{id}/report/retry                                                    [implemented]
+                                 re-sends the trigger for a failed or missing report: 202;
+                                 a ready report is returned as is (200); 404 as above
 ```
 
 The current user is always derived from the auth token, never from request bodies.

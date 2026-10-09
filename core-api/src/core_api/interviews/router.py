@@ -130,18 +130,7 @@ def get_interview_report(
     no report for an ended interview, the trigger was lost: it is sent
     again here and the answer is 202 (lazy re-trigger).
     """
-    interview = service.get_interview_for_user(
-        db,
-        interview_id=interview_id,
-        owner_user_id=current_user.id,
-    )
-    if interview is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
-    if interview.status not in _ENDED:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Interview is '{interview.status}'; reports exist once it has ended",
-        )
+    interview = _ended_interview(db, interview_id=interview_id, owner_user_id=current_user.id)
 
     try:
         report = evaluation_client.get_report(interview.id)
@@ -162,3 +151,60 @@ def get_interview_report(
     if response.status == "generating":
         return _generating(response)
     return response
+
+
+@router.post(
+    "/{interview_id}/report/retry",
+    response_model=ReportResponse,
+    responses={
+        202: {"model": ReportResponse, "description": "Report generation (re)started"},
+        404: {"description": "Interview not found, or it has not ended"},
+        503: {"description": "Evaluation Service unavailable"},
+    },
+)
+def retry_interview_report(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ReportResponse | JSONResponse:
+    """Ask for a `failed` (or missing) report to be generated again.
+
+    Reading a failed report doesn't regenerate it (decision 051), so the
+    report page offers this instead. A ready report is returned as is;
+    otherwise the trigger is re-sent, which Evaluation Service makes safe
+    to repeat: generating and ready reports are left alone (decision 049).
+    """
+    interview = _ended_interview(db, interview_id=interview_id, owner_user_id=current_user.id)
+
+    try:
+        report = evaluation_client.get_report(interview.id)
+        if report is not None and report["status"] == "ready":
+            return ReportResponse.model_validate(report)
+        evaluation_client.trigger_report(
+            interview_id=interview.id,
+            repository_id=interview.repository_id,
+            outcome=interview.status,
+        )
+    except evaluation_client.EvaluationServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reports are unavailable right now; try again shortly",
+        ) from exc
+
+    return _generating(ReportResponse(interview_id=interview.id, status="generating"))
+
+
+def _ended_interview(db: Session, *, interview_id: int, owner_user_id: int):
+    """The user's interview, if it has ended. 404 otherwise, the same for
+    missing and not-yours so ownership doesn't leak."""
+    interview = service.get_interview_for_user(
+        db, interview_id=interview_id, owner_user_id=owner_user_id
+    )
+    if interview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+    if interview.status not in _ENDED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Interview is '{interview.status}'; reports exist once it has ended",
+        )
+    return interview
