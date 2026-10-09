@@ -54,7 +54,7 @@ flowchart LR
 | [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report endpoint | Auth, repositories, interviews, session tokens and lifecycle events implemented; triggers the report when an interview ends and serves it at `GET /v1/interviews/{id}/report` |
 | [repository-service](repository-service/) | Clone, chunk, embed and retrieve repository code | Ingestion, retrieval and chunks-by-id implemented. Public repositories only for now |
 | [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Spoken interview loop implemented (Groq Whisper STT, Deepgram TTS); terminal mic client |
-| [evaluation-service](evaluation-service/) | Grades each answer and writes the end-of-interview report | Grading pipeline, report endpoints, repeat-trigger rules and startup resume implemented; grader evals in `evals/` |
+| [evaluation-service](evaluation-service/) | Grades each answer and writes the end-of-interview report | Grading pipeline, report endpoints, repeat-trigger rules and startup resume implemented and run live; grader sanity sets in `evals/` |
 | frontend | React + Vite + TypeScript SPA | Not started |
 
 Details: [docs/architecture.md](docs/architecture.md). The reasoning behind every choice: [docs/decisions.md](docs/decisions.md).
@@ -100,6 +100,7 @@ Reports have been run live too (interviews 10 and 11): a full interview's report
 Limits today:
 - Public GitHub repositories only. Private repositories are planned (decision 001), but cloning doesn't use the user's GitHub token yet.
 - Groq's free tier fits one live interview at a time (decision 048) and about 10 reports a day (decision 051).
+- Grading under-scores a correct answer about code outside the question's excerpts, and can give 3/5 to an answer its own feedback calls inaccurate (decision 050, grader sanity set v2).
 - Runs locally; not deployed, no CI yet.
 
 Next: the frontend.

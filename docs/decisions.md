@@ -2094,8 +2094,8 @@ Two checks, both with `gpt-oss-120b` (decision 051):
   questions from interview 7, each with a strong, a vague and a wrong
   answer written from the code before any grading run.
 
-The prompt went through five versions; each fixed something the checks
-showed:
+The prompt went through six versions; v5 is the one in use. Each fixed
+something the checks showed, except v4 and v6, which were reverted:
 
 | Version | Problem found | Change |
 |---|---|---|
@@ -2104,12 +2104,31 @@ showed:
 | v3 | Sanity set 24/24 over 3 runs, identical scores each run. But "I don't know" turns came back with no key points | Key points always required |
 | v4 | Tried "restating the question earns nothing" to push the vague answer from 3 to 2. No effect; reverted | — |
 | v5 | A summary file reason claimed a file "contains the accidental commit" (it doesn't) | Reasons say what to study, never what a file contains |
+| v6 | Live reports for interviews 10 and 11 (below) | Never call a claim false because its code isn't shown; score must agree with gaps; key points state facts, not advice. No effect on set v2; reverted |
 
-Sanity set on v3 (3 runs): strong 5/5/5 and 5/5/5, vague 3/3/3 and
-1/1/1, wrong 2/2/2 and 1/1/1. The wrong answers' gaps named the actual
-mistake every time. The final v5 prompt changes only the key-point and
-summary instructions; its sanity run is pending because the day's token
-budget ran out during tuning (decision 051).
+Sanity set v1 on v3 and on v5 (3 runs each, identical scores): strong
+5/5/5 and 5/5/5, vague 3/3/3 and 1/1/1, wrong 2/2/2 and 1/1/1. The wrong
+answers' gaps named the actual mistake every time.
+
+**Set v2.** The live reports for interviews 10 and 11 showed three
+problems set v1 can't catch, because both its cases have the whole
+mechanism in the excerpts. Set v2 is v1's cases plus one case for each:
+- `abandoned-checkout-stock` (interview 10, turn 4; the wrong answer is
+  the real transcript): the wrong answer's gap says the reservation
+  "persists indefinitely, which is not true", yet correctness is 3.
+- `chat-db-drop-unseen-code` (interview 11, turn 1): the excerpts are
+  overview docs without the chat router. A strong answer that is true of
+  the real code scores 2, because the grader can't confirm it.
+- A few key points are phrased as advice ("should catch …").
+
+| Prompt | Set v2 checks | Advice key points |
+|---|---|---|
+| v5 (1 run) | 14/16: abandoned wrong 3; unseen-code strong 2 | 3/33 |
+| v6 (2 runs) | 26/32: same two failures; unseen-code vague and wrong rose to 2, tying strong | 2/68 |
+
+v6 changed neither score: the model ignored the new score-must-agree rule
+even in the very gap it was written for. It was reverted, and these are
+recorded as limitations below rather than tuned further.
 
 **Tradeoff:**
 - About seven LLM calls per report instead of one, which is slower
@@ -2119,13 +2138,24 @@ budget ran out during tuning (decision 051).
   ranks below a strong answer and above a wrong one. Two prompt rules
   didn't move it.
 - The judge only sees the chunks the question was built from. An answer
-  that is correct about code outside those chunks can be under-scored.
+  that is correct about code outside those chunks is under-scored: in
+  set v2 a correct, concrete answer scores 2/5 when its code isn't in
+  the excerpts, and a prompt rule (v6) didn't change that.
+- **A score can contradict its own gap.** An answer whose gap calls its
+  core claim inaccurate can still get 3/5 correctness, which inflates
+  the average. The gaps are right; the number is too high.
+- A few key points are phrased as advice ("should …") when the excerpts
+  don't show the mechanism: about 1 in 10–20.
 - A dropped key point is silent to the candidate. The count of dropped
   citations is logged so it can be watched.
 
 **Revisit when:**
 - Candidates often dispute correctness scores about code outside the
-  turn's chunks: add a retrieval on the answer itself.
+  turn's chunks: add a retrieval on the answer itself. This is the
+  likely fix for `chat-db-drop-unseen-code`, since a prompt rule wasn't.
+- Score/gap contradictions matter in practice: ask for the gaps first
+  and the score after them in the JSON, or a second short call that
+  checks the score against the gaps.
 - Scores for the same answer vary a lot between runs: lower the
   temperature, or grade twice and average.
 - A third dimension is asked for (for example depth, or tradeoff
@@ -2168,7 +2198,8 @@ fails at once and a later trigger regenerates it (decision 049).
   roughly 18k: **about 10 reports a day** on the free tier. Each report
   now logs its token count, so this can be measured rather than
   estimated.
-- Grading quality: decision 050's sanity set, 24/24 checks over 3 runs.
+- Grading quality: decision 050's sanity set v1, 24/24 checks over 3
+  runs; set v2, 14/16 with two known limitations (decision 050).
 
 **Tradeoff:**
 - About 10 reports a day across all users. Enough for development and a

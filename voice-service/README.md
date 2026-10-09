@@ -99,4 +99,3 @@ The runner tests drive the whole loop with fake collaborators: no network, datab
 ## What's next
 
 - **Measure the turn latency** against the 4–5 s target (decision 006) using `turns.timings`.
-- **Evaluation Service:** build reports from `turns`.
