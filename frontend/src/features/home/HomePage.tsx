@@ -21,7 +21,10 @@ export function HomePage() {
   if (home.state === "loading") return <PageSpinner />;
   if (home.state === "error") return <ConnectionProblem onRetry={home.reload} />;
 
-  const { repositories, interviews } = home.data;
+  const { repositories } = home.data;
+  // A `created` interview never started (its token expired unused, or the
+  // tab closed before connecting): not something the user did.
+  const interviews = home.data.interviews.filter((i) => i.status !== "created");
   const hasReady = repositories.some((r) => r.status === "ready");
 
   return (

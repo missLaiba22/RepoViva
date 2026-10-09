@@ -30,3 +30,10 @@ export interface Interview {
   created_at: string;
   updated_at: string;
 }
+
+/** POST /v1/interviews only: the one response that carries the raw session
+ * token (decision 035). Keep it in memory; never in the URL or storage. */
+export interface InterviewCreated extends Interview {
+  session_token: string;
+  session_token_expires_at: string;
+}

@@ -16,10 +16,15 @@ RepoViva's web app: React + Vite + TypeScript (decision 017). It talks to Core A
   - While indexing: a progress bar, refreshed every 2 s.
   - When ready: **Start interview**.
   - When failed: the reason, and a way forward.
+- **Interview setup** (`/repositories/:id/interview`):
+  - What to expect.
+  - A microphone check: permission, a picker when there's more than one mic, a live level meter, and "we can hear you" once you speak.
+  - A test sound for the speakers, and an option to type answers instead.
+  - **Start interview** unlocks once the mic has heard you, or straight away in typing mode. Only then is the interview created, because its session token lasts 5 minutes. The token goes to the live page in router state only, never in the URL or browser storage (decision 035).
 - **Sign out** from the header (`POST /v1/auth/github/logout`).
 - Light and dark themes. Follows the system until you pick one with the toggle.
 
-Interview setup, the live interview and the report are routed, but their screens are not built yet.
+The live interview and the report are routed, but their screens are not built yet.
 
 Home never reads reports. For an ended interview that has no report, reading one makes Core API trigger grading, which spends real tokens.
 
@@ -34,6 +39,7 @@ src/
     auth/                  session context, RequireAuth, landing page
     home/                  home page, recent interviews
     repositories/          list, status chip, connect page, repository page, URL normalising
+    interview/             setup page, mic check, level meter, audio/ (browser mic and speakers)
   components/              Button, Card, EmptyState, ProgressBar, Spinner, Logo, ThemeToggle
   hooks/                   useResource, usePolling, useTheme
   styles/                  tokens.css (palette, type, spacing), global.css

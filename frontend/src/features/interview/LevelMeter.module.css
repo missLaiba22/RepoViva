@@ -1,0 +1,22 @@
+.meter {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  align-items: end;
+  gap: 3px;
+  height: 1.75rem;
+}
+
+.on,
+.off {
+  height: 100%;
+  border-radius: 2px;
+  transition: background-color 60ms linear;
+}
+
+.on {
+  background: var(--primary);
+}
+
+.off {
+  background: var(--surface-sunken);
+}

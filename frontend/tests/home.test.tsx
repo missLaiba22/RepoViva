@@ -57,6 +57,14 @@ describe("home", () => {
     expect(within(rows[2]).queryByRole("link", { name: /view report/i })).toBeNull();
   });
 
+  it("hides interviews that never started", async () => {
+    signedIn([repository()], [interview(), interview({ id: 13, status: "created", started_at: null, ended_at: null })]);
+    renderApp("/home");
+
+    const list = await screen.findByRole("list", { name: "Recent interviews" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+  });
+
   it("never reads reports from the home page", async () => {
     const api = signedIn([repository()], [interview()]);
     renderApp("/home");
