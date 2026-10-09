@@ -1,0 +1,54 @@
+.mic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--on-primary);
+  cursor: pointer;
+  transition: background-color 150ms ease, transform 150ms ease, opacity 150ms ease;
+}
+
+.mic:hover:not(:disabled) {
+  background: var(--primary-hover);
+  transform: scale(1.03);
+}
+
+.mic:focus-visible {
+  border-radius: 50%;
+}
+
+.mic:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.recording {
+  background: var(--primary-hover);
+}
+
+/* A slow, soft ring: "listening", without alarm-red. */
+.recording::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+  opacity: 0.5;
+  animation: ring 1.8s ease-out infinite;
+}
+
+@keyframes ring {
+  from {
+    transform: scale(0.94);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(1.18);
+    opacity: 0;
+  }
+}

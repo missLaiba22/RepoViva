@@ -55,7 +55,7 @@ flowchart LR
 | [repository-service](repository-service/) | Clone, chunk, embed and retrieve repository code | Ingestion, retrieval and chunks-by-id implemented. Public repositories only for now |
 | [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Spoken interview loop implemented (Groq Whisper STT, Deepgram TTS); terminal mic client |
 | [evaluation-service](evaluation-service/) | Grades each answer and writes the end-of-interview report | Grading pipeline, report endpoints, repeat-trigger rules and startup resume implemented and run live; grader sanity sets in `evals/` |
-| [frontend](frontend/) | React + Vite + TypeScript SPA | Sign-in, home, connect repository, repository status and interview setup (mic check) implemented; live interview and report next |
+| [frontend](frontend/) | React + Vite + TypeScript SPA | Sign-in, home, connect repository, interview setup and the live spoken interview implemented; report screen next |
 
 Details: [docs/architecture.md](docs/architecture.md). The reasoning behind every choice: [docs/decisions.md](docs/decisions.md).
 
