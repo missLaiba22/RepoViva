@@ -12,7 +12,7 @@ Four Python microservices in a monorepo, sharing one PostgreSQL + pgvector datab
 
 ```mermaid
 flowchart LR
-    FE[Browser<br/>React SPA planned]
+    FE[Browser<br/>React SPA]
 
     CORE[Core API<br/>auth · repos · interviews · reports]
     REPO[Repository Service<br/>ingest · retrieve]
@@ -26,8 +26,8 @@ flowchart LR
     TTS[Deepgram<br/>Aura-2 TTS]
     AI[Groq<br/>grading LLM]
 
-    FE -. REST .-> CORE
-    FE -. WebSocket .-> VOICE
+    FE -- REST --> CORE
+    FE -- WebSocket --> VOICE
     CORE -- OAuth --> GH
     CORE -- ingest trigger --> REPO
     REPO -- status events --> CORE
@@ -47,15 +47,15 @@ flowchart LR
     EVAL --> DB
 ```
 
-*Solid lines are implemented. The frontend (dashed) is planned; until it exists, interviews run through a terminal mic client.*
+*Every line is implemented. Interviews run in the browser, or through a terminal mic client (`voice-service/scripts/interview_cli.py`).*
 
 | Service | Role | Status |
 |---|---|---|
-| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report endpoint | Auth (login, logout), repositories, interviews, session tokens and lifecycle events implemented; triggers the report when an interview ends and serves it at `GET /v1/interviews/{id}/report` |
+| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report endpoint | Auth (login, logout), repositories, interviews, session tokens and lifecycle events implemented; triggers the report when an interview ends, serves it at `GET /v1/interviews/{id}/report`, and retries a failed one |
 | [repository-service](repository-service/) | Clone, chunk, embed and retrieve repository code | Ingestion, retrieval and chunks-by-id implemented. Public repositories only for now |
-| [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Spoken interview loop implemented (Groq Whisper STT, Deepgram TTS); terminal mic client |
+| [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Spoken interview loop implemented (Groq Whisper STT, Deepgram TTS); used by the web app and a terminal mic client |
 | [evaluation-service](evaluation-service/) | Grades each answer and writes the end-of-interview report | Grading pipeline, report endpoints, repeat-trigger rules and startup resume implemented and run live; grader sanity sets in `evals/` |
-| [frontend](frontend/) | React + Vite + TypeScript SPA | Sign-in, home, connect repository, interview setup and the live spoken interview implemented; report screen next |
+| [frontend](frontend/) | React + Vite + TypeScript SPA | All screens implemented: sign-in, home, connect repository, interview setup, live spoken interview and report |
 
 Details: [docs/architecture.md](docs/architecture.md). The reasoning behind every choice: [docs/decisions.md](docs/decisions.md).
 
@@ -64,7 +64,7 @@ Details: [docs/architecture.md](docs/architecture.md). The reasoning behind ever
 - **Backend:** Python 3.11+, FastAPI, `uv`, pytest, ruff
 - **Database:** PostgreSQL 16 + pgvector (Docker Compose locally)
 - **Ingestion:** CocoIndex (syntax-aware chunking), Voyage `voyage-4-lite` embeddings
-- **Frontend:** React + Vite + TypeScript (planned)
+- **Frontend:** React + Vite + TypeScript, Web Audio (decision 017)
 - **Interview LLM:** Groq `qwen/qwen3.8-27b` via litellm (decisions 038, 046)
 - **STT:** Groq `whisper-large-v3-turbo` (decision 043)
 - **TTS:** Deepgram Aura-2, streamed (decision 044)
@@ -83,6 +83,9 @@ cd core-api && uv sync && uv run alembic upgrade head && uv run uvicorn core_api
 cd repository-service && uv sync && uv run uvicorn repository_service.main:app --reload --port 8001
 cd voice-service && uv sync && uv run uvicorn voice_service.main:app --reload --port 8002
 cd evaluation-service && uv sync && uv run uvicorn evaluation_service.main:app --port 8003
+
+# 3. Start the web app, then open http://localhost:5173 (localhost, not 127.0.0.1)
+cd frontend && npm install && npm run dev
 ```
 
 Evaluation Service runs without `--reload` on purpose: a reload stops reports mid-generation (they resume on the next start, decision 049). On Windows, point service URLs at `127.0.0.1`, not `localhost` (`localhost` adds about 2 s per call).
@@ -103,4 +106,4 @@ Limits today:
 - Grading under-scores a correct answer about code outside the question's excerpts, and can give 3/5 to an answer its own feedback calls inaccurate (decision 050, grader sanity set v2).
 - Runs locally; not deployed, no CI yet.
 
-Next: the frontend.
+Next: run a full interview in the browser end to end, then deployment.

@@ -29,10 +29,15 @@ RepoViva's web app: React + Vite + TypeScript (decision 017). It talks to Core A
   - **Type instead** at any turn (`answer.text`), or for the whole interview if typing was chosen in setup or the mic can't open.
   - **End interview** asks first, then sends `session.end`, so it still counts as completed. Leaving the page also asks first. Closing the tab ends the interview as interrupted, with a partial report.
   - End screens: complete, ended early, interrupted (answers kept), session expired or reused (close 1008), and "can't be reopened" after a reload.
+- **Report** (`/interviews/:id/report`):
+  - Average correctness and clarity (1–5) and how many questions were answered.
+  - **What went well**, **Work on next**, and **Files to revisit**, each file linking to GitHub.
+  - **Question by question:** your answer, both scores with their reasons, strengths and gaps, and **What a strong answer covers**. Each key point links to the exact lines on GitHub. Unanswered questions are listed but not scored.
+  - While grading: a progress state, refreshed every 4 s.
+  - If grading failed: **Try grading again** (`POST /v1/interviews/{id}/report/retry`).
+  - Links point at the default branch (`blob/HEAD`), so they show today's code, which may have changed since indexing.
 - **Sign out** from the header (`POST /v1/auth/github/logout`).
 - Light and dark themes. Follows the system until you pick one with the toggle.
-
-The report is routed, but its screen is not built yet.
 
 Home never reads reports. For an ended interview that has no report, reading one makes Core API trigger grading, which spends real tokens.
 
@@ -41,16 +46,17 @@ Home never reads reports. For an ended interview that has no report, reading one
 ```
 src/
   main.tsx                 fonts, styles, AuthProvider, router
-  app/                     router, signed-in layout (header), placeholder pages
+  app/                     router, signed-in layout (header), not-found page
   api/                     fetch wrapper (ApiError) and Core API response types
   features/
     auth/                  session context, RequireAuth, landing page
     home/                  home page, recent interviews
     repositories/          list, status chip, connect page, repository page, URL normalising
+    report/                report page, summary, question list, source links
     interview/             setup page, mic check, level meter
       audio/               mic check, capture (PCM16 16 kHz), question player, pcm maths
       live/                live page, protocol, state reducer, socket hook
-  components/              Button, Card, EmptyState, ProgressBar, Spinner, Logo, ThemeToggle
+  components/              Button, Card, EmptyState, ProgressBar, ScoreBar, Spinner, Logo, ThemeToggle
   hooks/                   useResource, usePolling, useTheme
   styles/                  tokens.css (palette, type, spacing), global.css
   lib/                     formatting

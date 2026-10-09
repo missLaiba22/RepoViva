@@ -2,9 +2,10 @@ import { createBrowserRouter } from "react-router-dom";
 import { LandingPage, RequireAuth } from "../features/auth";
 import { HomePage } from "../features/home";
 import { LivePage, SetupPage } from "../features/interview";
+import { ReportPage } from "../features/report";
 import { ConnectRepositoryPage, RepositoryPage } from "../features/repositories";
 import { Layout } from "./Layout";
-import { NotBuiltYet, NotFound } from "./placeholders";
+import { NotFound } from "./placeholders";
 
 export const router = createBrowserRouter([
   { path: "/", element: <LandingPage /> },
@@ -19,7 +20,7 @@ export const router = createBrowserRouter([
       { path: "/repositories/new", element: <ConnectRepositoryPage /> },
       { path: "/repositories/:id", element: <RepositoryPage /> },
       { path: "/repositories/:id/interview", element: <SetupPage /> },
-      { path: "/interviews/:id/report", element: <NotBuiltYet title="Interview report" /> },
+      { path: "/interviews/:id/report", element: <ReportPage /> },
     ],
   },
   // The live interview is a focused room: signed in, but without the header.
