@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     github_client_id: str
     github_client_secret: str
     github_oauth_redirect_uri: str
+    # Where the browser goes after login: the frontend's /home. Its host
+    # must match GITHUB_OAUTH_REDIRECT_URI's (localhost), or the session
+    # cookie set on the callback won't reach the frontend.
+    frontend_base_url: str = "http://localhost:5173"
 
     # Secrets
     cookie_secret: str

@@ -9,6 +9,7 @@ from core_api.auth.github_oauth import (
     exchange_code_for_token,
     fetch_github_user,
 )
+from core_api.config import get_settings
 from core_api.db import get_db
 from core_api.security.cookies import (
     SESSION_MAX_AGE_SECONDS,
@@ -24,9 +25,6 @@ router = APIRouter(prefix="/v1/auth/github", tags=["auth"])
 STATE_COOKIE = "repoviva_oauth_state"
 SESSION_COOKIE = "repoviva_session"
 
-FRONTEND_AFTER_LOGIN_URL = "http://localhost:8000/docs"
-# ^ For now, after login we send you to the Swagger UI so you can hit /v1/me.
-# Will point to the real frontend URL once the frontend exists.
 
 
 @router.get("/login")
@@ -81,7 +79,8 @@ def callback(
     )
 
     # 5. Set session, clear state cookie, redirect
-    response = RedirectResponse(url=FRONTEND_AFTER_LOGIN_URL, status_code=status.HTTP_302_FOUND)
+    after_login = f"{get_settings().frontend_base_url.rstrip('/')}/home"
+    response = RedirectResponse(url=after_login, status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         key=SESSION_COOKIE,
         value=sign_session(user.id),
@@ -92,4 +91,16 @@ def callback(
         path="/",
     )
     response.delete_cookie(key=STATE_COOKIE, path="/")
+    return response
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout() -> Response:
+    """Clear the session cookie. Safe to call when not logged in.
+
+    POST, not GET, so a link or image on another site can't log you out.
+    The session is a signed cookie with no server-side row, so clearing
+    it is the whole logout.
+    """
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(key=SESSION_COOKIE, path="/", httponly=True, samesite="lax")
     return response
