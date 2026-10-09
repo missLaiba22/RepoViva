@@ -1,0 +1,1047 @@
+{
+  "model": "groq/openai/gpt-oss-120b",
+  "prompt_version": "v6",
+  "results": [
+    {
+      "case": "deadlock-lock-order",
+      "runs": [
+        {
+          "run": 1,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly describes the canonical lock ordering implemented in the code: items are sorted by product_id before acquiring SELECT ... FOR UPDATE locks (backend/app/modules/orders/service.py:12) and promotions are locked after products (backend/app/modules/orders/service.py:54). This prevents the circular wait scenario described."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The explanation is concise, well\u2011structured, and directly answers the interviewer's question without unnecessary digressions."
+              },
+              "strengths": [
+                "Identified the exact place where sorting occurs (create_order).",
+                "Explained the deadlock scenario clearly with two checkouts.",
+                "Mentioned the additional ordering rule for promo locks."
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, ensuring a consistent lock acquisition order across concurrent checkouts.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promotions are validated and locked only after all product rows have been locked, preserving the same global lock order.",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 3,
+                "justification": "The candidate correctly identified that sorting by product_id provides a consistent lock order, which is related to the code comment about a canonical lock order to avoid deadlocks (backend/app/modules/orders/service.py:12). However, the explanation is vague and does not describe how consistent ordering prevents circular wait conditions, which is the core reason for deadlock avoidance."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable and directly addresses the question, but it is brief and uses generic terms like \u201cbest practice\u201d without detailing the mechanism, making it only moderately clear."
+              },
+              "strengths": [
+                "Mentioned that sorting creates consistency",
+                "Recognized that this helps with concurrency"
+              ],
+              "gaps": [
+                "Did not explain how consistent lock ordering prevents circular wait deadlocks",
+                "Used vague language like \u201cdatabase doesn't get confused\u201d without technical detail",
+                "Did not reference the specific lock ordering implementation in the code"
+              ],
+              "key_points": [
+                {
+                  "point": "Sorting the checkout items by product_id ensures that all concurrent checkouts acquire product locks in the same order, eliminating circular wait conditions that cause deadlocks (see backend/app/modules/orders/service.py:12).",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "The service explicitly notes a canonical lock order and that promo locks occur after product locks to maintain a consistent ordering (see backend/app/modules/orders/service.py:54).",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate mentions sorting for faster index reads and optimistic locking, which is not supported by the provided code. The code explicitly sorts items to enforce a canonical lock order to avoid deadlocks (backend/app/modules/orders/service.py:12-144, 244-246). There is no evidence of optimistic locking or version columns, so the answer is mostly wrong."
+              },
+              "clarity": {
+                "score": 3,
+                "justification": "The answer is understandable but mixes unrelated concepts (index speed, optimistic locking) and does not clearly explain the lock ordering mechanism."
+              },
+              "strengths": [
+                "Attempted to explain why ordering matters",
+                "Mentioned that locks are involved"
+              ],
+              "gaps": [
+                "Incorrectly claims sorting improves index read speed for deadlock avoidance",
+                "Introduces optimistic locking which is not present in the code",
+                "Fails to state that sorting enforces a consistent lock acquisition order across concurrent checkouts"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, ensuring all concurrent checkouts acquire product locks in the same order and thus preventing circular wait conditions.",
+                  "chunk_ids": [
+                    142,
+                    244
+                  ]
+                },
+                {
+                  "point": "Locks are taken using SELECT ... FOR UPDATE on each product (see get_by_id_for_update), and the lock order is the only mechanism used to avoid deadlocks; there is no optimistic locking version column.",
+                  "chunk_ids": [
+                    355
+                  ]
+                },
+                {
+                  "point": "The code comments explicitly call this a \"canonical lock order\" that closes a pre\u2011existing deadlock gap (architecture review point 5).",
+                  "chunk_ids": [
+                    142,
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244,
+                355
+              ]
+            }
+          }
+        },
+        {
+          "run": 2,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate accurately describes the mechanism shown in the code: the service sorts items by product_id before acquiring SELECT ... FOR UPDATE locks (backend/app/modules/orders/service.py:12) and locks promo after products (backend/app/modules/orders/service.py:54). This canonical lock order prevents the circular wait scenario described."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The explanation is concise, well\u2011ordered, and directly answers the interviewer's question about deadlock prevention."
+              },
+              "strengths": [
+                "Correctly identified the sorting step before locking",
+                "Explained the deadlock scenario and how a canonical order resolves it",
+                "Mentioned that promo locking follows the same global order"
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "The checkout service sorts cart items by product_id before acquiring SELECT \u2026 FOR UPDATE locks, establishing a canonical lock order (backend/app/modules/orders/service.py:12).",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Promo validation and locking occurs after product locks, preserving the same global lock ordering (backend/app/modules/orders/service.py:54).",
+                  "chunk_ids": [
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate says sorting keeps things consistent and is a best practice, but does not explain that sorting by product_id enforces a canonical lock acquisition order which prevents circular wait deadlocks. The code comments explicitly state this purpose, which the answer omits."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is vague and does not directly address how sorting prevents deadlocks; it wanders into generic statements about consistency and best practices, making it hard for an interviewer to follow."
+              },
+              "strengths": [],
+              "gaps": [
+                "The answer does not explain that sorting enforces a consistent lock acquisition order to avoid circular wait deadlocks.",
+                "It fails to mention that the locks are taken on product rows via SELECT\u202fFOR\u202fUPDATE.",
+                "It provides only generic statements about \"best practice\" without linking to the specific mechanism in the code."
+              ],
+              "key_points": [
+                {
+                  "point": "Sorting the checkout items by product_id ensures that all concurrent checkouts acquire product row locks in the same order, eliminating circular wait conditions that cause deadlocks.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "The lock is obtained with a SELECT\u202fFOR\u202fUPDATE on each product (see get_by_id_for_update), so consistent ordering directly affects lock acquisition order.",
+                  "chunk_ids": [
+                    355
+                  ]
+                },
+                {
+                  "point": "The code comment explicitly calls this a \"canonical lock order\" to close a pre\u2011existing deadlock gap (architecture review point 5).",
+                  "chunk_ids": [
+                    142,
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244,
+                355
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate correctly notes that sorting by product_id is used, but their explanation is inaccurate. The code sorts items to enforce a canonical lock order (backend/app/modules/orders/service.py:12\u2011144, 244\u2011246) to prevent deadlocks, not to make lookups faster or reduce lock time. The answer also mentions optimistic locking with a version column, which is not present in the provided excerpts."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is easy to follow and directly addresses the question, but the reasoning is off\u2011track."
+              },
+              "strengths": [
+                "Identified that sorting by product_id is part of the checkout process",
+                "Mentioned that locking is involved during checkout"
+              ],
+              "gaps": [
+                "Incorrectly claims sorting improves index read speed and reduces lock duration",
+                "States that optimistic locking with a version column is used, which the code does not show",
+                "Does not explain the canonical lock order that actually prevents deadlocks"
+              ],
+              "key_points": [
+                {
+                  "point": "The service sorts checkout items by product_id before acquiring any row locks, ensuring all concurrent checkouts acquire product locks in the same order and thus avoid circular wait conditions.",
+                  "chunk_ids": [
+                    142
+                  ]
+                },
+                {
+                  "point": "Locks on product rows are taken with SELECT\u202fFOR\u202fUPDATE (see get_by_id_for_update), and the promotion lock is acquired after the product locks, preserving a consistent lock hierarchy.",
+                  "chunk_ids": [
+                    355
+                  ]
+                },
+                {
+                  "point": "The code does not implement optimistic locking with a version column; deadlock prevention relies solely on the deterministic lock ordering.",
+                  "chunk_ids": [
+                    142,
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                142,
+                244,
+                355
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "lost-expiry-webhook",
+      "runs": [
+        {
+          "run": 1,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly described that stock is decremented when a Stripe checkout session is created (shown in backend/app/modules/orders/service.py:127) and that stock is only restored when the checkout.session.expired webhook triggers mark_checkout_expired, which checks that the checkout is still pending before releasing stock (shown in backend/app/modules/orders/service.py:214). The code contains no background job or other recovery path, so if the webhook is never delivered the stock remains reserved. This matches the behavior described in the answer."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer directly addressed the interview question, explained the sequence of events clearly, and identified the missing fallback in a concise, well\u2011ordered way."
+              },
+              "strengths": [
+                "Identified the exact point where stock is decremented",
+                "Explained the role of the expiry webhook in restoring stock",
+                "Noted the absence of any other recovery mechanism"
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "Stock quantity is reduced at checkout creation (product.stock_quantity -= quantity)",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "The expiry webhook calls mark_checkout_expired, which only releases stock if the checkout is still pending",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "There is no other code (e.g., a background job) that restores stock if the expiry webhook is lost",
+                  "chunk_ids": [
+                    471
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate claims Stripe will handle the situation and the stock will stay fine, but the code shows stock is decremented at checkout creation (backend/app/modules/orders/service.py:127) and only restored when the `checkout.session.expired` webhook triggers `mark_checkout_expired`. If that webhook is lost, the restoration never runs, so the stock remains incorrectly reduced. The answer is therefore incorrect."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is very brief and vague, offering no concrete explanation of the project's behavior. It does not directly address the mechanism of stock restoration or the consequences of a missing webhook."
+              },
+              "strengths": [],
+              "gaps": [
+                "The answer does not mention that stock is decremented at checkout creation (backend/app/modules/orders/service.py:127).",
+                "It fails to explain that stock is restored only when `mark_checkout_expired` processes the webhook.",
+                "It ignores the risk that a lost/undelivered webhook leaves stock permanently reduced."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock quantity is decreased when a checkout session is created (product.stock_quantity -= quantity).",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "When Stripe sends a `checkout.session.expired` webhook, `mark_checkout_expired` should restore the stock; if the webhook is never delivered, that restoration never happens, leaving stock incorrectly reduced.",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "Both `mark_checkout_paid` and `mark_checkout_expired` log a warning and return quietly when the `stripe_session_id` is unknown, preventing crashes but also providing no automatic recovery for lost webhooks.",
+                  "chunk_ids": [
+                    471
+                  ]
+                },
+                {
+                  "point": "The design separates payment status from fulfillment status, with `Checkout.payment_status` tracking PAID, PENDING, or EXPIRED, but does not include a fallback for missed expiry events.",
+                  "chunk_ids": [
+                    465
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471,
+                465
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate claims stock is only decremented after payment succeeds, but the code in backend/app/modules/orders/service.py:127 shows stock_quantity is reduced when the checkout session is created, before payment. Therefore the statement is false."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is concise and directly addresses the question, making it easy to follow, though the content is incorrect."
+              },
+              "strengths": [
+                "Directly answered the specific scenario asked",
+                "Clear and brief"
+              ],
+              "gaps": [
+                "Stock is actually decremented at checkout creation, not waiting for payment (backend/app/modules/orders/service.py:127)",
+                "The answer ignores the mechanism that would restore stock on an expired session"
+              ],
+              "key_points": [
+                {
+                  "point": "Stock quantity is reduced when a checkout session is created, not when payment succeeds",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "If a checkout expires, the system relies on the expiry webhook to handle the situation (e.g., potentially restoring stock)",
+                  "chunk_ids": [
+                    407
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407
+              ]
+            }
+          }
+        },
+        {
+          "run": 2,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly described that stock is decremented when a Stripe checkout session is created (see backend/app/modules/orders/service.py:127) and that stock is only restored when the checkout.session.expired webhook triggers mark_checkout_expired, which checks for a pending checkout before releasing stock (see backend/app/modules/orders/service.py:214). The code and DECISIONS.md (DECISIONS.md:508 and DECISIONS.md:567) confirm there is no other mechanism such as a background job to reclaim stock if the webhook is lost, so the candidate\u2019s claim that the units remain reserved is accurate."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer directly addressed the interview question, explained the flow step\u2011by\u2011step, and clearly stated the consequence of a missing webhook and a possible mitigation."
+              },
+              "strengths": [
+                "Identified the exact point where stock is decremented",
+                "Explained the reliance on the expiry webhook for restoring stock",
+                "Noted the absence of any fallback mechanism"
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "Stock is decremented at checkout creation (product.stock_quantity -= quantity)",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "The expiry webhook handler (mark_checkout_expired) only releases stock for pending checkouts and returns quietly if the webhook is missing",
+                  "chunk_ids": [
+                    407,
+                    471
+                  ]
+                },
+                {
+                  "point": "There is no background job or other code that restores stock when the expiry webhook is lost, so reserved units remain unavailable",
+                  "chunk_ids": [
+                    481
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                407,
+                471,
+                481
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate claims Stripe handles the situation and the system stays consistent, but the code shows that stock is only restored in the expiry webhook (not shown) and that missing webhooks are only logged, so stock would remain decremented. This contradicts the actual behavior."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is vague and does not directly address the mechanism; it wanders into generic statements about Stripe and consistency without explaining the project's logic."
+              },
+              "strengths": [],
+              "gaps": [
+                "The answer incorrectly assumes Stripe automatically fixes the stock issue.",
+                "It fails to mention that the project relies on the expiry webhook to restore stock and that missing webhooks are only logged, not retried."
+              ],
+              "key_points": [
+                {
+                  "point": "When a Stripe checkout session expires, the `mark_checkout_expired` handler is supposed to restore the product's `stock_quantity` that was decremented at session creation.",
+                  "chunk_ids": [
+                    407
+                  ]
+                },
+                {
+                  "point": "If the expiry webhook is lost, the handler never runs; the code only logs a warning and returns, leaving the stock permanently reduced.",
+                  "chunk_ids": [
+                    407,
+                    471
+                  ]
+                },
+                {
+                  "point": "The system does not have a retry mechanism for lost expiry webhooks, so stock inconsistency can occur until manual intervention.",
+                  "chunk_ids": [
+                    471
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                407,
+                471
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 1,
+                "justification": "The candidate claims stock is only decremented after payment succeeds, but the code in backend/app/modules/orders/service.py:127 shows stock_quantity is reduced when the checkout session is created, before payment. This contradicts the answer."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is concise and directly addresses the question, making it easy to follow, though the content is inaccurate."
+              },
+              "strengths": [
+                "Directly addressed the specific scenario asked about",
+                "Clear and brief explanation"
+              ],
+              "gaps": [
+                "Incorrectly states that stock is only decremented after payment succeeds, whereas it is decremented at checkout creation (backend/app/modules/orders/service.py:127)",
+                "Fails to mention that the system restores stock on an expiry webhook, which is part of the design"
+              ],
+              "key_points": [
+                {
+                  "point": "Stock quantity is decremented when a checkout session is created, not after payment succeeds (see backend/app/modules/orders/service.py:127).",
+                  "chunk_ids": [
+                    353
+                  ]
+                },
+                {
+                  "point": "An expiry webhook (handled in mark_checkout_expired) is intended to restore stock if the session expires, and missing webhooks are logged but do not cause loss of stock (see backend/app/modules/orders/service.py:197 and DECISIONS.md:508).",
+                  "chunk_ids": [
+                    399,
+                    471
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                353,
+                399,
+                471
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "abandoned-checkout-stock",
+      "runs": [
+        {
+          "run": 1,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly describes that stock is reserved (decremented) during order creation before the Stripe session, that the reservation persists until the Stripe session expires, and that artisans only see paid orders via a join filter. All these points are supported by the provided excerpts."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer is direct, well\u2011structured, and clearly explains the behavior and the trade\u2011off without unnecessary digression."
+              },
+              "strengths": [
+                "Accurately identified the stock reservation point in the checkout flow",
+                "Explained the release of stock on Stripe session expiry",
+                "Mentioned the artisan\u2019s view being limited to paid orders"
+              ],
+              "gaps": [],
+              "key_points": [
+                {
+                  "point": "Stock is reserved (stock_quantity decremented) during create_order before the Stripe session is created, and is released only when the Stripe session expires.",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "Artisans see only orders whose checkout has payment_status == PAID, enforced via a JOIN in OrderRepository.list_by_artisan.",
+                  "chunk_ids": [
+                    467
+                  ]
+                },
+                {
+                  "point": "The order row is created at checkout start, linking checkout and artisan, but remains invisible to the artisan until payment is completed.",
+                  "chunk_ids": [
+                    323,
+                    244
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                461,
+                467,
+                323,
+                244
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate says the system automatically frees reserved stock when a checkout is abandoned, but the excerpts only state that stock is decremented at session creation and remains reserved until the Stripe session expires, potentially stranding inventory. No mechanism for immediate release is shown, so the answer is mostly wrong."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is very brief and vague, mentioning Stripe and the backend without explaining how the reserved stock is handled, making it hard for an interviewer to follow."
+              },
+              "strengths": [],
+              "gaps": [
+                "Claims that stock is automatically released on abandonment, which is not supported by the code excerpts.",
+                "Does not explain that stock stays reserved until the Stripe session expires, as described in the decisions document."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented and reserved at order creation, before the Stripe session is created, and remains reserved until the Stripe checkout session expires, which can strand inventory if the customer never pays.",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "There is no shown logic that automatically releases reserved stock on checkout abandonment; the system relies on session expiration to eventually free it.",
+                  "chunk_ids": [
+                    461,
+                    323
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                461,
+                323
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 3,
+                "justification": "The candidate correctly notes that stock is reserved when checkout starts, matching the design described in DECISIONS.md (DECISIONS.md:455). However, they omit the important detail that the reservation is only held until the Stripe session expires and may be released then; they imply the reservation persists indefinitely and can always be completed later, which is inaccurate."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is brief but directly addresses the question and is easy to understand. It stays on topic, though it lacks detail."
+              },
+              "strengths": [
+                "Directly answered the question about what happens when checkout is abandoned",
+                "Mentioned that the reserved item remains after abandonment"
+              ],
+              "gaps": [
+                "Did not mention that the reservation is released when the Stripe session expires",
+                "Implied the reservation persists indefinitely, which is not true"
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented and reserved at the moment the checkout session is created, before any payment is made (DECISIONS.md:455).",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "The reservation remains only until the Stripe session expires; if the customer never completes payment, the stock is eventually released (DECISIONS.md:455).",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "The order creation code creates a checkout and reserves stock before the Stripe session, as shown in the service layer (backend/app/modules/orders/service.py:101).",
+                  "chunk_ids": [
+                    323
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                461,
+                323
+              ]
+            }
+          }
+        },
+        {
+          "run": 2,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 5,
+                "justification": "The candidate correctly describes that stock is reserved (decremented) before the Stripe session is created, as stated in DECISIONS.md (DECISIONS.md:455). They also accurately note that the order row is created early (backend/app/modules/orders/service.py:101) and that artisans only see paid orders via a JOIN filter (DECISIONS.md:483). The explanation matches the documented behavior."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer is concise, directly addresses the question, and follows a logical flow: reservation timing, what happens on abandonment, and artisan visibility."
+              },
+              "strengths": [
+                "Referenced the documented trade\u2011off about reserving stock early",
+                "Mentioned that the order record exists immediately",
+                "Explained why artisans only see paid orders"
+              ],
+              "gaps": [
+                "Did not detail how the system actually releases the stock when the Stripe session expires (the cleanup mechanism is not shown in the excerpts)"
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented at order creation, before the Stripe checkout session, so the product\u2019s available quantity is reduced immediately (DECISIONS.md:455).",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "An Order row is created as soon as checkout starts, but artisans only see orders whose checkout is PAID, enforced by a JOIN filter (backend/app/modules/orders/service.py:101 and DECISIONS.md:483).",
+                  "chunk_ids": [
+                    323,
+                    467
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                461,
+                467,
+                323
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate says the system automatically takes care of reserved stock so it doesn't stay stuck, implying an immediate or guaranteed release. The excerpts state that stock is decremented at session creation and remains reserved until the Stripe session expires, potentially stranding inventory. No mechanism for immediate release is shown, so the answer is mostly vague and partially wrong."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The answer is very brief and does not explain the process; it mentions Stripe and the backend but gives no concrete steps, making it hard to follow."
+              },
+              "strengths": [],
+              "gaps": [
+                "Claims automatic handling of reserved stock without describing the expiration-based release.",
+                "Does not mention that stock may remain reserved until the Stripe session expires, as described in the decisions doc."
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is decremented and reserved at checkout session creation, before payment is made.",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "If the customer abandons the checkout, the reserved stock stays reserved until the Stripe session expires, potentially stranding inventory.",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "There is no shown code that immediately releases reserved stock on checkout abandonment.",
+                  "chunk_ids": [
+                    461
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                461
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 3,
+                "justification": "The candidate correctly noted that the reserved item stays reserved when the checkout is abandoned, which matches the design that stock is reserved at session creation (DECISIONS.md:455). However, they omitted that the reservation is only temporary and will be released when the Stripe session expires, and they implied the customer can always later complete payment without any timeout, which is inaccurate."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is brief and easy to understand, directly addressing the question, but it lacks detail and nuance."
+              },
+              "strengths": [
+                "Directly addressed the question about what happens to reserved stock",
+                "Mentioned that the reservation persists after abandonment"
+              ],
+              "gaps": [
+                "Did not mention that the reservation is released when the checkout session expires",
+                "Implied the customer can always later complete payment without any timeout"
+              ],
+              "key_points": [
+                {
+                  "point": "Stock is reserved at the moment the checkout session is created, before payment is made (see DECISIONS.md:455).",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "If the customer abandons the checkout, the reserved stock remains held only until the Stripe session expires, after which it is released back to inventory (see DECISIONS.md:455).",
+                  "chunk_ids": [
+                    461
+                  ]
+                },
+                {
+                  "point": "The reservation occurs before any payment confirmation and can lead to temporarily stranded inventory until the session expires (see DECISIONS.md:455).",
+                  "chunk_ids": [
+                    461
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                461,
+                323
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "chat-db-drop-unseen-code",
+      "runs": [
+        {
+          "run": 1,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate describes a try/except block in the WebSocket handler that catches database errors, logs them, and sends an error frame to the client. None of the provided excerpts (e.g., DECISIONS.md flow description, router/service file listings) show such error\u2011handling logic, nor do they indicate that the frontend swaps an empty bubble for an error message. Because the answer cannot be confirmed by the code shown, it is mostly vague or possibly wrong."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is easy to follow: it explains what happens on the backend (exception caught, error sent) and on the frontend (error displayed, socket stays open). The structure is clear even though the details are not supported by the excerpts."
+              },
+              "strengths": [
+                "Explains the overall sequence of handling a failure (catch, log, send error).",
+                "Mentions that the socket remains open so the user can retry.",
+                "Describes the frontend behavior of showing an error message."
+              ],
+              "gaps": [
+                "No evidence in the excerpts that the WebSocket handler wraps processing in a try/except block.",
+                "The code excerpts do not show sending an error frame or logging the exception.",
+                "Frontend error handling (useChat swapping the bubble) is not demonstrated in the provided files."
+              ],
+              "key_points": [
+                {
+                  "point": "The chatbot router defines a WebSocket endpoint that processes each user message in a loop.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The service performs vector search and calls the LLM; any exception would need to be caught and an error response sent to the client.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The frontend hook useChat receives messages from the WebSocket and updates UI state; error handling would be implemented there.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The excerpts do not show the actual try/except or error\u2011frame logic, so the candidate's claim cannot be verified.",
+                  "chunk_ids": [
+                    509
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                509
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate only says the widget \"deals with errors\" and \"goes back to normal\" without describing any concrete mechanism. The provided excerpts describe the chat flow and the WebSocket endpoint but do not show any error\u2011handling or reconnection logic, so the answer cannot be confirmed as accurate."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The response is very brief and vague; it does not explain how the widget detects the disconnect, what UI feedback is shown, or how the connection is restored, making it hard for an interviewer to follow."
+              },
+              "strengths": [],
+              "gaps": [
+                "No description of how the WebSocket client detects a dropped DB connection.",
+                "No mention of UI feedback or retry/reconnect logic in the chat widget.",
+                "No reference to specific code (e.g., router, service, or frontend hook) that implements error handling."
+              ],
+              "key_points": [
+                {
+                  "point": "The WebSocket endpoint in `backend/app/modules/chatbot/router.py` receives the question, calls the service which performs vector search and streams the answer; if the DB connection fails, the service would raise an exception that the router must catch and send an error message over the socket.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The frontend hook `useChat.js` manages the WebSocket connection; it should listen for `close` or `error` events, update the chat state to show an error message, and attempt to reconnect when the connection is restored.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The excerpts do not show any explicit error\u2011handling or reconnection code, so the current behavior cannot be verified from the provided material.",
+                  "chunk_ids": [
+                    509
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                509
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate says the chat does not touch the database after the question is sent, but the excerpts describe a flow that includes a vector search in the PostgreSQL database (pgvector) as part of generating the answer (DECISIONS.md:700). Therefore the claim is inaccurate."
+              },
+              "clarity": {
+                "score": 5,
+                "justification": "The answer is concise and directly addresses the question, making it easy to understand."
+              },
+              "strengths": [
+                "Clear and brief response",
+                "Directly addresses the scenario asked"
+              ],
+              "gaps": [
+                "Fails to mention that the question is embedded and a vector search is performed against the database before calling Groq",
+                "Does not acknowledge any error handling for a database failure during retrieval"
+              ],
+              "key_points": [
+                {
+                  "point": "After the user sends a question, the backend embeds the text and performs a vector search in the `document_embeddings` table (pgvector) before calling Groq",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "If the database connection drops during that vector search, the retrieval step fails and the chat cannot stream a response until the issue is resolved",
+                  "chunk_ids": [
+                    509
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                509
+              ]
+            }
+          }
+        },
+        {
+          "run": 2,
+          "grades": {
+            "strong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The answer claims that the WebSocket handler catches database errors in a try block, logs them, and sends an error frame while keeping the socket open. None of the provided excerpts show such try/except logic, error framing, or frontend error handling for a dropped DB connection. The excerpts only describe the normal chat flow (vector search, Groq streaming) and the modules involved, without any mention of error handling. Therefore the claim cannot be confirmed and is likely inaccurate."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The candidate explains a clear sequence of steps for handling the failure, using concrete terms like \"try block\", \"error frame\", and \"useChat's error handler\". The answer is understandable and stays on topic, though the lack of supporting evidence makes it less convincing."
+              },
+              "strengths": [
+                "Provided a step\u2011by\u2011step description of what would happen on failure",
+                "Mentioned both backend (exception handling) and frontend (error display) aspects",
+                "Used specific terminology (WebSocket handler, useChat) that matches the project structure"
+              ],
+              "gaps": [
+                "No evidence in the excerpts that the WebSocket handler wraps processing in a try/except block",
+                "The code for sending an error frame or logging the exception is not shown",
+                "Frontend error handling behavior for a failed reply is not demonstrated in the provided files"
+              ],
+              "key_points": [
+                {
+                  "point": "The chat flow is implemented as a WebSocket endpoint that receives the question, embeds it, performs a vector search, builds a prompt, streams the answer from Groq, and sends each token back to the browser.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The repository layer only performs data access and does not contain authorization or error\u2011handling logic; such concerns are handled at the service or route level.",
+                  "chunk_ids": [
+                    13
+                  ]
+                },
+                {
+                  "point": "The excerpts do not show any try/except around the vector search or any mechanism for sending an error frame to the client when the database connection fails.",
+                  "chunk_ids": [
+                    509,
+                    13
+                  ]
+                },
+                {
+                  "point": "The frontend uses a WebSocket transport (chatSocket.js) and a useChat hook to manage the connection and message state, but the provided code does not illustrate how it reacts to backend errors.",
+                  "chunk_ids": [
+                    509
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                509,
+                13
+              ]
+            },
+            "vague": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate only says the widget \"deals with errors\" and \"goes back to normal\" but provides no concrete mechanism. The excerpts describe the WebSocket flow (DECISIONS.md:700) but do not show any error\u2011handling or reconnection logic, so the answer cannot be verified as correct."
+              },
+              "clarity": {
+                "score": 2,
+                "justification": "The response is very brief and vague; it does not explain how the disconnect is detected, what the widget does, or how normal operation resumes, making it hard for an interviewer to follow."
+              },
+              "strengths": [],
+              "gaps": [
+                "No description of how the WebSocket error is detected on the client.",
+                "No explanation of any retry or reconnection strategy in the frontend code.",
+                "No mention of how the backend service or repository handles a failed vector search due to a dropped DB connection."
+              ],
+              "key_points": [
+                {
+                  "point": "When the DB connection drops, the chatbot service raises an exception during the retrieval step, which is caught and results in an error message sent over the WebSocket.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The frontend useChat hook listens for WebSocket error/close events and updates UI state to show a disconnected status and optionally attempts to reconnect.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "If reconnection succeeds, the chat widget clears the error state and resumes normal message handling.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The excerpts do not show the actual error\u2011handling implementation, so the candidate needs to reference that code.",
+                  "chunk_ids": [
+                    509
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                509
+              ]
+            },
+            "wrong": {
+              "correctness": {
+                "score": 2,
+                "justification": "The candidate says the chat does not touch the database after the question is sent, but the DECISIONS.md excerpt shows the flow includes a vector search in the PostgreSQL database (pgvector) before calling Groq. Therefore the claim is inaccurate."
+              },
+              "clarity": {
+                "score": 4,
+                "justification": "The answer is brief and easy to follow, but it is factually wrong about the system\u2019s behavior."
+              },
+              "strengths": [
+                "Clear and concise wording",
+                "Directly addresses the asked scenario"
+              ],
+              "gaps": [
+                "Fails to mention the vector\u2011search step that queries the database before streaming the answer",
+                "Does not explain what the system would actually do if the DB connection drops (e.g., fallback to no context or error)"
+              ],
+              "key_points": [
+                {
+                  "point": "After the user sends a question, the backend embeds the text and performs a vector search in the PostgreSQL `document_embeddings` table before calling Groq, so a DB drop would affect this retrieval step.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "If the database connection fails during that retrieval, the chatbot service cannot fetch context and may return an error or a response without retrieved context.",
+                  "chunk_ids": [
+                    509
+                  ]
+                },
+                {
+                  "point": "The excerpts do not show any explicit retry or offline handling logic for a DB failure in the chat flow.",
+                  "chunk_ids": [
+                    509
+                  ]
+                }
+              ],
+              "evidence_chunk_ids": [
+                509
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
