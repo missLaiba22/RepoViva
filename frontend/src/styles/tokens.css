@@ -1,0 +1,111 @@
+/* RepoViva design tokens. Components use only these variables.
+   Palette: warm ivory, deep teal, muted sage, charcoal, muted blue. */
+
+:root {
+  color-scheme: light;
+
+  --bg: #f7f3ea;
+  --surface: #fcfaf5;
+  --surface-sunken: #f1ece0;
+  --border: #e4ded0;
+  --border-strong: #d3cbb8;
+
+  --text: #2b2d2f;
+  --text-muted: #6b6e70;
+
+  --primary: #1f5c5a;
+  --primary-hover: #174846;
+  --on-primary: #fcfaf5;
+
+  --secondary: #8fa68e;
+  --secondary-text: #5e7560; /* sage dark enough for small text on ivory */
+  --secondary-soft: #e7ede3;
+
+  --accent: #5b7a99;
+  --accent-soft: #e3e9ef;
+
+  --warning: #8f6d34;
+  --warning-soft: #f3ead8;
+  --danger: #a65a4e;
+  --danger-soft: #f4e3df;
+
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+  --shadow-soft: 0 1px 2px rgb(43 45 47 / 0.04);
+
+  --font-serif: "Source Serif 4 Variable", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: clamp(2rem, 1.4rem + 2.4vw, 2.75rem);
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  --content-width: 56rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1a1c1b;
+    --surface: #232625;
+    --surface-sunken: #1e2120;
+    --border: #343836;
+    --border-strong: #454a47;
+    --text: #e8e4da;
+    --text-muted: #a3a39b;
+    --primary: #5fa8a3;
+    --primary-hover: #77bab5;
+    --on-primary: #1a1c1b;
+    --secondary: #8fa68e;
+    --secondary-text: #a7bca6;
+    --secondary-soft: #2c3530;
+    --accent: #8aa6c2;
+    --accent-soft: #28313a;
+    --warning: #c9a46a;
+    --warning-soft: #352e22;
+    --danger: #c98276;
+    --danger-soft: #3a2a27;
+    --shadow-soft: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1c1b;
+  --surface: #232625;
+  --surface-sunken: #1e2120;
+  --border: #343836;
+  --border-strong: #454a47;
+  --text: #e8e4da;
+  --text-muted: #a3a39b;
+  --primary: #5fa8a3;
+  --primary-hover: #77bab5;
+  --on-primary: #1a1c1b;
+  --secondary: #8fa68e;
+  --secondary-text: #a7bca6;
+  --secondary-soft: #2c3530;
+  --accent: #8aa6c2;
+  --accent-soft: #28313a;
+  --warning: #c9a46a;
+  --warning-soft: #352e22;
+  --danger: #c98276;
+  --danger-soft: #3a2a27;
+  --shadow-soft: none;
+}

@@ -1,0 +1,100 @@
+.page {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 38rem;
+  padding-top: var(--space-5);
+}
+
+.title {
+  font-size: var(--text-2xl);
+}
+
+.lead {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+}
+
+.card {
+  padding: var(--space-5);
+}
+
+.label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  transition: border-color 120ms ease;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.input:focus-visible {
+  border-color: var(--accent);
+  border-radius: var(--radius);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.hint,
+.error {
+  min-height: 1.5em;
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.hint {
+  color: var(--text-muted);
+}
+
+.hint code {
+  color: var(--accent);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.next {
+  padding: 0 var(--space-1);
+}
+
+.nextTitle {
+  font-size: var(--text-lg);
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.steps li::marker {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}

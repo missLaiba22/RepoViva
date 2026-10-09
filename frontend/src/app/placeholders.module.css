@@ -1,0 +1,5 @@
+.narrow {
+  max-width: 32rem;
+  margin: var(--space-8) auto;
+  padding: 0 var(--space-4);
+}

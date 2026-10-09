@@ -51,11 +51,11 @@ flowchart LR
 
 | Service | Role | Status |
 |---|---|---|
-| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report endpoint | Auth, repositories, interviews, session tokens and lifecycle events implemented; triggers the report when an interview ends and serves it at `GET /v1/interviews/{id}/report` |
+| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews, report endpoint | Auth (login, logout), repositories, interviews, session tokens and lifecycle events implemented; triggers the report when an interview ends and serves it at `GET /v1/interviews/{id}/report` |
 | [repository-service](repository-service/) | Clone, chunk, embed and retrieve repository code | Ingestion, retrieval and chunks-by-id implemented. Public repositories only for now |
 | [voice-service](voice-service/) | Live interview over WebSocket (STT → retrieval → LLM → TTS) | Spoken interview loop implemented (Groq Whisper STT, Deepgram TTS); terminal mic client |
 | [evaluation-service](evaluation-service/) | Grades each answer and writes the end-of-interview report | Grading pipeline, report endpoints, repeat-trigger rules and startup resume implemented and run live; grader sanity sets in `evals/` |
-| frontend | React + Vite + TypeScript SPA | Not started |
+| [frontend](frontend/) | React + Vite + TypeScript SPA | Sign-in, home, connect repository and repository status implemented; interview and report screens next |
 
 Details: [docs/architecture.md](docs/architecture.md). The reasoning behind every choice: [docs/decisions.md](docs/decisions.md).
 
