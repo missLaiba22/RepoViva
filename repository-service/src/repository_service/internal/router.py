@@ -13,6 +13,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Query,
     status,
 )
 from pydantic import BaseModel, Field
@@ -22,7 +23,7 @@ from repository_service.config import Settings, get_settings
 from repository_service.db import get_db_pool
 from repository_service.indexing.embedder import EMBEDDER
 from repository_service.ingestion.orchestrator import run_ingestion
-from repository_service.retrieval import get_chunks_by_ids, search_chunks
+from repository_service.retrieval import get_chunks_by_ids, list_areas, search_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,15 @@ class ChunksByIdBody(BaseModel):
     # A report covers about six turns of six chunks each; 200 leaves room
     # without letting one call pull a whole repository.
     ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class AreaOut(BaseModel):
+    path: str
+    chunk_count: int
+
+
+class AreasResponse(BaseModel):
+    areas: list[AreaOut]
 
 
 verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
@@ -131,3 +141,22 @@ async def get_chunks(
         ids=body.ids,
     )
     return {"chunks": chunks}
+
+
+@router.get(
+    "/repositories/{repository_id}/areas",
+    response_model=AreasResponse,
+    dependencies=[Depends(verify_hmac)],
+)
+async def get_areas(
+    repository_id: int,
+    limit: int = Query(ge=1, le=50),
+) -> AreasResponse:
+    """The repository's `limit` largest areas, for question planning (decision 052).
+
+    Always 200: no chunks gives an empty list, as /retrieve does.
+    """
+    areas = await list_areas(get_db_pool(), repository_id=str(repository_id), limit=limit)
+    return AreasResponse(
+        areas=[AreaOut(path=a.path, chunk_count=a.chunk_count) for a in areas]
+    )

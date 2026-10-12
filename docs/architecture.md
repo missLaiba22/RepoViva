@@ -284,6 +284,19 @@ body: { ids: int[] }   // 1–200
 → 200 { chunks: [ { id, content, filename, start_line, end_line, language } ] }
 ```
 
+**Implemented (decision 052; no caller yet).**
+
+Voice Service → Repository Service (areas, for question planning)
+```
+GET /internal/v1/repositories/{repository_id}/areas?limit=6   // 1–50
+→ 200 { areas: [ { path, chunk_count } ] }   // largest first
+→ 401 (bad HMAC)  → 422 (limit missing or out of range)
+```
+`path` is a directory ending in `/`, or a file when the level holds no
+directories, so it can be passed straight to `/retrieve` as
+`filename_prefix`. Always 200, with `areas: []` for a repository with no
+chunks, like `/retrieve`.
+
 ### WebSocket — served by Voice Service
 
 Interview turns are not REST. Once an interview is created by Core API, the client connects a WebSocket to the Voice Service, presenting the session token issued by Core API.
@@ -446,7 +459,7 @@ above and delete it here.
   `POST /internal/v1/interviews/{id}/plan` (HMAC-signed) → 202.
 - Voice Service gets the repository's areas (directories with chunk counts)
   from a new Repository Service endpoint,
-  `GET /internal/v1/repositories/{id}/areas`. It retrieves 2 chunks per area,
+  `GET /internal/v1/repositories/{id}/areas` (built, see above). It retrieves 2 chunks per area,
   for at most `MAX_QUESTIONS` areas, using `filename_prefix`, and writes the
   whole ordered plan in one LLM call. Questions are scenario-based and never
   name code (decision 048's rules, now in the planning prompt).
