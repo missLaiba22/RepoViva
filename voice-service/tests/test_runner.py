@@ -7,12 +7,18 @@ import httpx
 import pytest
 
 from voice_service.clients.core_api import ConsumedSession, TokenRejectedError
-from voice_service.clients.repository import Chunk
-from voice_service.llm.prompts import OPENING_SEED_QUERY
 from voice_service.session.runner import InterviewSession, SessionConfig
+from voice_service.session.store import PlannedQuestion
 
 SESSION = ConsumedSession(interview_id=7, user_id=2, repository_id=15)
 DISCONNECT = object()
+
+
+def planned(n):
+    return [
+        PlannedQuestion(seq=i, area=f"area{i}/", topic=f"topic {i}", text=f"Q{i}?", chunk_ids=[i])
+        for i in range(1, n + 1)
+    ]
 
 
 class FakeSocket:
@@ -61,30 +67,6 @@ class FakeCore:
         self.events.append((interview_id, event_type, error_message))
 
 
-class FakeRetriever:
-    def __init__(self):
-        self.calls: list[tuple[str, list[int]]] = []
-        self._next_id = 1
-
-    async def retrieve(self, repository_id, query, *, top_k, exclude_chunk_ids):
-        self.calls.append((query, list(exclude_chunk_ids)))
-        chunk = Chunk(self._next_id, "code", "a.py", 1, 2, "python", 0.9)
-        self._next_id += 1
-        return [chunk]
-
-
-class FakeGenerator:
-    def __init__(self, fail=False):
-        self._fail = fail
-        self.histories = []
-
-    async def generate_question(self, history, chunks):
-        if self._fail:
-            raise RuntimeError("rate limited")
-        self.histories.append(list(history))
-        return f"Q{len(history) + 1}?"
-
-
 class FakeTranscriber:
     """Returns scripted transcripts in order; an Exception item is raised."""
 
@@ -115,42 +97,42 @@ class FakeSynthesizer:
         yield b"aud2"
 
 
-class FakeTurns:
-    def __init__(self):
-        self.rows: dict[int, dict] = {}
+class FakeSessions:
+    """The session document's questions, keyed by seq. plan=None: not ready."""
 
-    async def create_turn(self, *, interview_id, seq, question_text, retrieved_chunk_ids, timings):
-        turn_id = len(self.rows) + 100
-        self.rows[turn_id] = {"seq": seq, "q": question_text, "ids": retrieved_chunk_ids,
-                              "answer": None, "timings": timings}
-        return turn_id
+    def __init__(self, plan):
+        self._plan = plan
+        self.questions = {
+            q.seq: {"status": "planned", "answer": None, "timings": {}} for q in plan or []
+        }
 
-    async def record_answer(self, turn_id, answer_text):
-        self.rows[turn_id]["answer"] = answer_text
+    async def load_plan(self, interview_id):
+        return self._plan
 
-    async def add_timings(self, turn_id, timings):
-        self.rows[turn_id]["timings"] |= timings
+    async def mark_asked(self, interview_id, seq):
+        self.questions[seq]["status"] = "asked"
+
+    async def record_answer(self, interview_id, seq, answer):
+        self.questions[seq] |= {"status": "answered", "answer": answer}
+
+    async def add_timings(self, interview_id, seq, timings):
+        self.questions[seq]["timings"] |= timings
 
 
-def make(core=None, generator=None, transcriber=None, synthesizer=None, max_questions=2,
-         timeout=1.0, max_answer_seconds=180):
+def make(core=None, transcriber=None, synthesizer=None, plan=..., timeout=1.0,
+         max_answer_seconds=180):
     parts = {
         "core": core or FakeCore(),
-        "retriever": FakeRetriever(),
-        "generator": generator or FakeGenerator(),
         "transcriber": transcriber or FakeTranscriber(),
         "synthesizer": synthesizer or FakeSynthesizer(),
-        "turns": FakeTurns(),
+        "sessions": FakeSessions(planned(2) if plan is ... else plan),
     }
     session = InterviewSession(
         core_api=parts["core"],
-        retriever=parts["retriever"],
-        generator=parts["generator"],
         transcriber=parts["transcriber"],
         synthesizer=parts["synthesizer"],
-        turns=parts["turns"],
-        config=SessionConfig(max_questions, timeout, retrieval_top_k=6,
-                             max_answer_seconds=max_answer_seconds),
+        sessions=parts["sessions"],
+        config=SessionConfig(timeout, max_answer_seconds=max_answer_seconds),
     )
     return session, parts
 
@@ -164,8 +146,12 @@ def answer(text):
     return {"type": "answer.text", "text": text}
 
 
-async def test_full_interview_completes_after_question_budget():
-    session, p = make(max_questions=2)
+def statuses(p):
+    return [(q["status"], q["answer"]) for q in p["sessions"].questions.values()]
+
+
+async def test_full_interview_plays_the_plan_in_order():
+    session, p = make(plan=planned(2))
     ws = FakeSocket(START, answer("first"), answer("second"))
 
     await session.run(ws)
@@ -174,28 +160,38 @@ async def test_full_interview_completes_after_question_budget():
         "session.ready", "question.text", "question.audio_end", "turn.complete",
         "question.text", "question.audio_end", "turn.complete", "session.end",
     ]
+    assert [m["text"] for m in ws.sent if m["type"] == "question.text"] == ["Q1?", "Q2?"]
     assert ws.sent[-1]["reason"] == "completed"
     assert ws.closed == (1000, None)
     assert p["core"].events == [(7, "interview.completed", None)]
-    # Turns persisted with answers and per-stage timings.
-    rows = list(p["turns"].rows.values())
-    assert [r["answer"] for r in rows] == ["first", "second"]
-    assert {"retrieval_ms", "llm_ms"} <= rows[0]["timings"].keys()
+    assert statuses(p) == [("answered", "first"), ("answered", "second")]
 
 
-async def test_retrieval_uses_seed_then_answer_and_excludes_used_chunks():
-    session, p = make(max_questions=2)
-    await session.run(FakeSocket(START, answer("because Y"), answer("ok")))
+async def test_messages_carry_seq():
+    session, _ = make(plan=planned(1))
+    ws = FakeSocket(START, answer("a"))
 
-    (q1, ex1), (q2, ex2) = p["retriever"].calls
-    assert q1 == OPENING_SEED_QUERY and ex1 == []
-    assert q2 == "Q1?\nbecause Y" and ex2 == [1]
-    # The second question sees the first exchange.
-    assert p["generator"].histories[1][0].answer == "because Y"
+    await session.run(ws)
+
+    assert ws.sent[1] == {"type": "question.text", "seq": 1, "text": "Q1?"}
+    assert ws.sent[2] == {"type": "question.audio_end", "seq": 1}
+    assert ws.sent[3] == {"type": "turn.complete", "seq": 1}
+
+
+async def test_plan_not_ready_is_interrupted_and_closed():
+    session, p = make(plan=None)
+    ws = FakeSocket(START)
+
+    await session.run(ws)
+
+    assert ws.types() == ["error"]
+    assert ws.sent[0]["code"] == "plan_not_ready"
+    assert ws.closed[0] == 1008
+    assert p["core"].events == [(7, "interview.interrupted", "plan not ready")]
 
 
 async def test_client_session_end_counts_as_completed():
-    session, p = make(max_questions=5)
+    session, p = make(plan=planned(5))
     ws = FakeSocket(START, answer("a"), {"type": "session.end"})
 
     await session.run(ws)
@@ -205,25 +201,12 @@ async def test_client_session_end_counts_as_completed():
 
 
 async def test_disconnect_mid_interview_is_interrupted():
-    session, p = make(max_questions=5)
+    session, p = make(plan=planned(5))
     await session.run(FakeSocket(START, answer("a"), DISCONNECT))
 
     assert p["core"].events == [(7, "interview.interrupted", "client disconnected")]
     # The unanswered question is still on record (decision 008).
-    assert [r["answer"] for r in p["turns"].rows.values()] == ["a", None]
-
-
-async def test_llm_failure_is_interrupted_with_error():
-    session, p = make(generator=FakeGenerator(fail=True))
-    ws = FakeSocket(START)
-
-    await session.run(ws)
-
-    (_, event_type, message), = p["core"].events
-    assert event_type == "interview.interrupted"
-    assert "rate limited" in message
-    assert ws.sent[-1]["type"] == "error"
-    assert ws.closed[0] == 1011
+    assert statuses(p)[:3] == [("answered", "a"), ("asked", None), ("planned", None)]
 
 
 @pytest.mark.parametrize(
@@ -270,7 +253,7 @@ async def test_first_message_must_be_session_start():
 
 
 async def test_bad_message_mid_interview_gets_error_and_continues():
-    session, p = make(max_questions=1)
+    session, p = make(plan=planned(1))
     ws = FakeSocket(START, {"type": "nope"}, answer("a"))
 
     await session.run(ws)
@@ -284,7 +267,7 @@ async def test_bad_message_mid_interview_gets_error_and_continues():
 
 async def test_spoken_answer_is_transcribed_recorded_and_echoed():
     transcriber = FakeTranscriber("I used asyncpg")
-    session, p = make(transcriber=transcriber, max_questions=1)
+    session, p = make(transcriber=transcriber, plan=planned(1))
     ws = FakeSocket(START, PCM, PCM, AUDIO_END)
 
     await session.run(ws)
@@ -293,21 +276,12 @@ async def test_spoken_answer_is_transcribed_recorded_and_echoed():
         "session.ready", "question.text", "question.audio_end", "transcript.final",
         "turn.complete", "session.end",
     ]
-    turn_id = ws.sent[1]["turn_id"]
-    assert ws.sent[3] == {"type": "transcript.final", "turn_id": turn_id, "text": "I used asyncpg"}
+    assert ws.sent[3] == {"type": "transcript.final", "seq": 1, "text": "I used asyncpg"}
     # Frames were joined into one answer, and the question was the prompt.
     assert transcriber.calls == [(PCM + PCM, "Q1?")]
-    row = p["turns"].rows[turn_id]
-    assert row["answer"] == "I used asyncpg"
-    assert "stt_ms" in row["timings"]
-
-
-async def test_follow_up_uses_the_transcript():
-    session, p = make(transcriber=FakeTranscriber("because Y", "ok"), max_questions=2)
-    await session.run(FakeSocket(START, PCM, AUDIO_END, PCM, AUDIO_END))
-
-    assert p["retriever"].calls[1][0] == "Q1?\nbecause Y"
-    assert p["generator"].histories[1][0].answer == "because Y"
+    question = p["sessions"].questions[1]
+    assert question["answer"] == "I used asyncpg"
+    assert "stt_ms" in question["timings"]
 
 
 @pytest.mark.parametrize(
@@ -319,20 +293,20 @@ async def test_follow_up_uses_the_transcript():
 )
 async def test_silence_gets_no_speech_and_the_turn_waits(first_try, transcripts):
     transcriber = FakeTranscriber(*transcripts)
-    session, p = make(transcriber=transcriber, max_questions=1)
+    session, p = make(transcriber=transcriber, plan=planned(1))
     ws = FakeSocket(START, *first_try, PCM, AUDIO_END)
 
     await session.run(ws)
 
     errors = [m for m in ws.sent if m["type"] == "error"]
     assert [e["code"] for e in errors] == ["no_speech"]
-    assert [r["answer"] for r in p["turns"].rows.values()] == ["real answer"]
+    assert statuses(p) == [("answered", "real answer")]
     assert p["core"].events == [(7, "interview.completed", None)]
 
 
 async def test_over_long_answer_is_dropped_then_retried():
     transcriber = FakeTranscriber("short one")
-    session, p = make(transcriber=transcriber, max_questions=1, max_answer_seconds=1)
+    session, p = make(transcriber=transcriber, plan=planned(1), max_answer_seconds=1)
     one_second = b"\x00" * 32_000
     ws = FakeSocket(START, one_second, PCM, PCM, AUDIO_END, PCM, AUDIO_END)
 
@@ -341,7 +315,7 @@ async def test_over_long_answer_is_dropped_then_retried():
     assert [m["code"] for m in ws.sent if m["type"] == "error"] == ["answer_too_long"]
     # Only the retry reached STT; the over-long audio was discarded.
     assert transcriber.calls == [(PCM, "Q1?")]
-    assert [r["answer"] for r in p["turns"].rows.values()] == ["short one"]
+    assert statuses(p) == [("answered", "short one")]
 
 
 async def test_stt_failure_is_interrupted():
@@ -361,16 +335,14 @@ async def test_stt_failure_is_interrupted():
 
 async def test_question_audio_streams_between_text_and_audio_end():
     synth = FakeSynthesizer()
-    session, p = make(synthesizer=synth, max_questions=1)
+    session, p = make(synthesizer=synth, plan=planned(1))
     ws = FakeSocket(START, answer("a"))
 
     await session.run(ws)
 
     assert synth.texts == ["Q1?"]
     assert ws.audio_out == [b"aud1-Q1?", b"aud2"]
-    turn_id = ws.sent[1]["turn_id"]
-    assert ws.sent[2] == {"type": "question.audio_end", "turn_id": turn_id}
-    assert {"tts_first_byte_ms", "tts_ms"} <= p["turns"].rows[turn_id]["timings"].keys()
+    assert {"tts_first_byte_ms", "tts_ms"} <= p["sessions"].questions[1]["timings"].keys()
 
 
 async def test_tts_failure_is_interrupted_with_question_on_record():
@@ -383,4 +355,4 @@ async def test_tts_failure_is_interrupted_with_question_on_record():
     assert event_type == "interview.interrupted"
     assert "deepgram 402" in message
     assert ws.closed[0] == 1011
-    assert [r["q"] for r in p["turns"].rows.values()] == ["Q1?"]
+    assert statuses(p)[0] == ("asked", None)

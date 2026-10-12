@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     core_api_base_url: str
     repository_service_base_url: str
     internal_hmac_secret: str
-    database_url: str
+
+    # Interview sessions (decision 053)
+    mongodb_uri: str
+    mongodb_database: str = "repoviva_voice"
 
     # LLM (decisions 038, 046). Passed to litellm explicitly: pydantic-settings
     # reads .env but does not export it to os.environ, where litellm
@@ -32,9 +35,9 @@ class Settings(BaseSettings):
     tts_voice: str = "aura-2-thalia-en"
 
     # Interview shape
-    max_questions: int = 6  # decision 041
+    max_questions: int = 6  # decision 041: one planned question per area (052)
     session_start_timeout_s: float = 10.0  # decision 035's consequence
-    retrieval_top_k: int = 6  # decision 042
+    plan_chunks_per_area: int = 2  # decision 052: sized for Groq's per-minute tokens
 
 
 @lru_cache

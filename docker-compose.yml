@@ -11,5 +11,15 @@ services:
     volumes:
       - repoviva_pg_data:/var/lib/postgresql/data
 
+  # Voice Service's interview sessions (decision 053). No auth: local only.
+  mongodb:
+    image: mongo:8.0
+    container_name: repoviva-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - repoviva_mongo_data:/data/db
+
 volumes:
   repoviva_pg_data:
+  repoviva_mongo_data:

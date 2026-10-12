@@ -1,43 +1,40 @@
-"""FastAPI-owned asyncpg pool for Voice Service.
+"""FastAPI-owned MongoDB client for Voice Service (decision 053).
 
-Opened in main.py's lifespan and closed on shutdown. The WebSocket
-handler reaches it through get_db_pool() — same shape as
-repository_service/db.py.
+Opened in main.py's lifespan and closed on shutdown, the same shape as
+the other services' Postgres pools. Code reaches the database through
+get_db().
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import asyncpg
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 
 from voice_service.config import get_settings
 
-_pool: asyncpg.Pool | None = None
+SESSIONS = "interview_sessions"
 
-_SCHEMA_SQL_PATH = Path(__file__).resolve().parent.parent.parent / "sql" / "schema.sql"
-
-
-async def init_pool() -> None:
-    global _pool
-    _pool = await asyncpg.create_pool(get_settings().database_url)
+_client: AsyncMongoClient | None = None
 
 
-async def apply_schema() -> None:
-    """Apply sql/schema.sql idempotently. Voice Service owns `turns` (decision 040)."""
-    sql = _SCHEMA_SQL_PATH.read_text()
-    async with get_db_pool().acquire() as conn:
-        await conn.execute(sql)
+async def init_db() -> None:
+    global _client
+    _client = AsyncMongoClient(get_settings().mongodb_uri, tz_aware=True)
 
 
-async def close_pool() -> None:
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+async def ensure_indexes() -> None:
+    """Idempotent: safe on every boot. One session document per interview."""
+    await get_db()[SESSIONS].create_index("interview_id", unique=True)
 
 
-def get_db_pool() -> asyncpg.Pool:
-    if _pool is None:
-        raise RuntimeError("DB pool not initialized — check FastAPI lifespan")
-    return _pool
+async def close_db() -> None:
+    global _client
+    if _client is not None:
+        await _client.close()
+        _client = None
+
+
+def get_db() -> AsyncDatabase:
+    if _client is None:
+        raise RuntimeError("MongoDB client not initialized — check FastAPI lifespan")
+    return _client[get_settings().mongodb_database]

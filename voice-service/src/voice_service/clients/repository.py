@@ -1,4 +1,4 @@
-"""Outbound calls to Repository Service: retrieve code chunks (decision 032)."""
+"""Outbound calls to Repository Service, for question planning (decisions 032, 052)."""
 
 from __future__ import annotations
 
@@ -11,12 +11,19 @@ from repoviva_common.http import get_async_client
 
 from voice_service.config import get_settings
 
+_AREAS_PATH = "/internal/v1/repositories/{repository_id}/areas"
 _RETRIEVE_PATH = "/internal/v1/repositories/{repository_id}/retrieve"
 
 # Retrieval embeds the query (one Voyage call) and runs an exact vector
-# search (decision 033). It sits on the turn path, so the timeout is part
-# of the 4–5 s budget (decision 006).
+# search (decision 033). Planning runs while the user waits on the live
+# page, so a stuck call should fail and be retried, not hang.
 _TIMEOUT_SECONDS = 10.0
+
+
+@dataclass(frozen=True)
+class Area:
+    path: str  # a directory ends with "/"; usable as a filename_prefix
+    chunk_count: int
 
 
 @dataclass(frozen=True)
@@ -44,24 +51,31 @@ class RepositoryClient:
         self._timeout = timeout
         self._http = http
 
+    async def list_areas(self, repository_id: int, *, limit: int) -> list[Area]:
+        """The repository's largest areas, largest first. Raises httpx.HTTPError."""
+        url = self._base_url + _AREAS_PATH.format(repository_id=repository_id)
+        # A GET has no body, so the signature covers the empty byte string.
+        headers = sign(body=b"", secret=self._secret)
+        resp = await self._http.get(
+            url, params={"limit": limit}, headers=headers, timeout=self._timeout
+        )
+        resp.raise_for_status()
+        return [Area(a["path"], int(a["chunk_count"])) for a in resp.json()["areas"]]
+
     async def retrieve(
         self,
         repository_id: int,
         query: str,
         *,
         top_k: int,
-        exclude_chunk_ids: list[int] | None = None,
+        filename_prefix: str,
     ) -> list[Chunk]:
-        """Top-k chunks for `query`. Raises httpx.HTTPError on any failure.
+        """Top-k chunks for `query` under `filename_prefix`. Raises httpx.HTTPError.
 
         An empty list is a valid answer (decision 032): the caller decides
-        what an interview with no code context should do.
+        what an area with no matching code means.
         """
-        body = {
-            "query": query,
-            "top_k": top_k,
-            "exclude_chunk_ids": exclude_chunk_ids or [],
-        }
+        body = {"query": query, "top_k": top_k, "filename_prefix": filename_prefix}
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         headers = {"Content-Type": "application/json", **sign(body=body_bytes, secret=self._secret)}
         url = self._base_url + _RETRIEVE_PATH.format(repository_id=repository_id)

@@ -1,4 +1,4 @@
-"""WebSocket protocol (decisions 039, 045).
+"""WebSocket protocol (decisions 039, 045, 053).
 
 JSON text frames, {"type": ..., ...}, carry control messages. Binary
 frames carry audio and are not modelled here: client → server is PCM16
@@ -32,7 +32,7 @@ class AnswerText(BaseModel):
 
     type: Literal["answer.text"]
     # Generous for a spoken-length answer; stops a client pushing
-    # megabytes into the prompt and the turns table.
+    # megabytes into the session document.
     text: str = Field(min_length=1, max_length=5000)
 
 
@@ -52,28 +52,29 @@ def parse_client_message(raw: str) -> ClientMessage:
 
 
 # --- Server → Client ---------------------------------------------------------
-# Plain dicts: the server only builds these, never parses them.
+# Plain dicts: the server only builds these, never parses them. A question
+# is identified by its `seq` in the plan (decision 053).
 
 
 def session_ready(interview_id: int) -> dict[str, Any]:
     return {"type": "session.ready", "interview_id": interview_id}
 
 
-def question_text(turn_id: int, seq: int, text: str) -> dict[str, Any]:
-    return {"type": "question.text", "turn_id": turn_id, "seq": seq, "text": text}
+def question_text(seq: int, text: str) -> dict[str, Any]:
+    return {"type": "question.text", "seq": seq, "text": text}
 
 
-def question_audio_end(turn_id: int) -> dict[str, Any]:
+def question_audio_end(seq: int) -> dict[str, Any]:
     """All of the question's audio frames have been sent."""
-    return {"type": "question.audio_end", "turn_id": turn_id}
+    return {"type": "question.audio_end", "seq": seq}
 
 
-def transcript_final(turn_id: int, text: str) -> dict[str, Any]:
-    return {"type": "transcript.final", "turn_id": turn_id, "text": text}
+def transcript_final(seq: int, text: str) -> dict[str, Any]:
+    return {"type": "transcript.final", "seq": seq, "text": text}
 
 
-def turn_complete(turn_id: int) -> dict[str, Any]:
-    return {"type": "turn.complete", "turn_id": turn_id}
+def turn_complete(seq: int) -> dict[str, Any]:
+    return {"type": "turn.complete", "seq": seq}
 
 
 def session_end(reason: Literal["completed", "ended_by_client"]) -> dict[str, Any]:

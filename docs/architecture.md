@@ -296,6 +296,25 @@ directories, so it can be passed straight to `/retrieve` as
 `filename_prefix`. Always 200, with `areas: []` for a repository with no
 chunks, like `/retrieve`.
 
+**Implemented (decision 052; Core API doesn't call these yet).**
+
+Core API → Voice Service (question plan)
+```
+POST /internal/v1/interviews/{interview_id}/plan
+body: { repository_id }
+→ 202 { interview_id, plan_status, scheduled }
+       (no-op if the plan is generating or ready; replans a failed one;
+        `scheduled` says whether a new run started)
+
+GET  /internal/v1/interviews/{interview_id}/plan
+→ 200 { interview_id, plan_status: "generating" | "ready" | "failed",
+        error_message, retryable }
+→ 404 planning never triggered
+```
+`retryable: false` means retrying can't help (the repository has no code),
+so the page shows no Try again button. The questions themselves never
+leave Voice Service.
+
 ### WebSocket — served by Voice Service
 
 Interview turns are not REST. Once an interview is created by Core API, the client connects a WebSocket to the Voice Service, presenting the session token issued by Core API.
@@ -315,11 +334,11 @@ Client → Server
 
 Server → Client
   session.ready       { interview_id }
-  question.text       { turn_id, seq, text }   sent before the audio, as captions
-  <binary>                                      question audio: PCM16 LE, 24 kHz, mono
-  question.audio_end  { turn_id }               all audio sent; the client may open the mic
-  transcript.final    { turn_id, text }         what STT heard
-  turn.complete       { turn_id }               answer persisted
+  question.text       { seq, text }   sent before the audio, as captions
+  <binary>                             question audio: PCM16 LE, 24 kHz, mono
+  question.audio_end  { seq }          all audio sent; the client may open the mic
+  transcript.final    { seq, text }    what STT heard
+  turn.complete       { seq }          answer persisted
   session.end         { reason: "completed" | "ended_by_client" }
   error               { code, message }
 ```
@@ -329,9 +348,14 @@ Error codes that keep the socket open and the turn waiting:
 `answer_too_long` (over `MAX_ANSWER_SECONDS`, default 180). `internal_error`
 precedes a 1011 close.
 
+`seq` is the question's position in the plan (decision 053; it replaced
+`turn_id`, a Postgres row id). `plan_not_ready` precedes a 1008 close when
+a session starts before its plan is ready, and the interview is reported
+`interrupted` (decision 052).
+
 Close codes: `1000` normal end · `1008` missing, invalid or rejected
 token (one generic reason; the specific 403 reason is only logged,
-decision 035) · `1011` internal failure (Core API unreachable at admission,
+decision 035), or plan not ready · `1011` internal failure (Core API unreachable at admission,
 or the session failed mid-way, including an STT or TTS provider error).
 
 ## Data Flow

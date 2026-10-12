@@ -16,7 +16,7 @@ from voice_service.clients.core_api import (
     CoreApiClient,
     TokenRejectedError,
 )
-from voice_service.clients.repository import RepositoryClient
+from voice_service.clients.repository import Area, RepositoryClient
 
 _SECRET = "test-secret"
 
@@ -84,11 +84,27 @@ async def test_interview_event_failure_is_swallowed():
     await _core(handler).send_interview_event(7, "interview.completed")
 
 
-async def test_retrieve_sends_exclusions_and_parses_chunks():
+def _repo(handler) -> RepositoryClient:
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return RepositoryClient("http://repo.test", _SECRET, http=http)
+
+
+async def test_list_areas_sends_limit_and_parses_areas():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/internal/v1/repositories/15/areas"
+        assert request.url.params["limit"] == "6"
+        _assert_signed(request)
+        return httpx.Response(200, json={"areas": [{"path": "core-api/", "chunk_count": 40}]})
+
+    assert await _repo(handler).list_areas(15, limit=6) == [Area("core-api/", 40)]
+
+
+async def test_retrieve_sends_prefix_and_parses_chunks():
     def handler(request):
         assert request.url.path == "/internal/v1/repositories/15/retrieve"
         assert json.loads(request.content) == {
-            "query": "q", "top_k": 6, "exclude_chunk_ids": [1, 2],
+            "query": "q", "top_k": 2, "filename_prefix": "app/",
         }
         _assert_signed(request)
         return httpx.Response(200, json={"chunks": [{
@@ -96,8 +112,6 @@ async def test_retrieve_sends_exclusions_and_parses_chunks():
             "start_line": 1, "end_line": 2, "language": "python", "similarity": 0.8,
         }]})
 
-    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    client = RepositoryClient("http://repo.test", _SECRET, http=http)
-    chunks = await client.retrieve(15, "q", top_k=6, exclude_chunk_ids=[1, 2])
+    chunks = await _repo(handler).retrieve(15, "q", top_k=2, filename_prefix="app/")
     assert [c.id for c in chunks] == [3]
     assert chunks[0].filename == "app/main.py"

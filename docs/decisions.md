@@ -2292,8 +2292,15 @@ There are no follow-up questions.
 `plan_status` lives only in Voice Service. Decision 036's interview
 states don't change: the interview stays `created` while its plan is
 prepared. Core API reads the plan status from Voice Service when the
-live page asks, and stores none of it. Voice Service refuses to start a
-session (before consuming the token) while the plan isn't `ready`.
+live page asks, and stores none of it.
+
+Voice Service checks the plan after consuming the token, because only
+the consume tells it which interview the token belongs to. If the plan
+isn't `ready`, it sends an `error` (`plan_not_ready`), closes the
+socket, and reports the interview `interrupted`. The live page opens the
+socket only once the plan is `ready`, so only a misbehaving client hits
+this (amended 2026-10-13; an earlier wording said "before consuming the
+token", which the protocol can't do without a client-sent interview id).
 
 *Where the user waits (amended 2026-10-13):*
 The setup page doesn't change: **Start interview** creates the interview

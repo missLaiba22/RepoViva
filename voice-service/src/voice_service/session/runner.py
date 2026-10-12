@@ -1,11 +1,14 @@
-"""The interview loop for one WebSocket connection (decisions 034–036, 039–045).
+"""The interview loop for one WebSocket connection (decisions 035–036, 039–045, 052).
 
-    session.start ─▶ consume token ─▶ [retrieve ─▶ LLM ─▶ persist ─▶ ask (text + TTS audio)
-                                        ◀── audio frames ─ audio.end ─▶ STT ─▶ persist] × N
-                                     ─▶ end event
+    session.start ─▶ consume token ─▶ load plan ─▶ [persist ─▶ ask (text + TTS audio)
+                       ◀── audio frames ─ audio.end ─▶ STT ─▶ persist] × planned questions
+                    ─▶ end event
+
+The questions were written before the session (decision 052), so a turn
+makes no LLM call and no retrieval.
 
 Collaborators are injected so tests can run the whole loop with fakes:
-no network, no database, no LLM.
+no network, no database.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -23,10 +26,9 @@ from fastapi import WebSocketDisconnect
 from pydantic import ValidationError
 
 from voice_service.clients.core_api import ConsumedSession, TokenRejectedError
-from voice_service.clients.repository import Chunk
-from voice_service.llm.prompts import OPENING_SEED_QUERY, Exchange
 from voice_service.session import protocol
 from voice_service.session.protocol import AnswerText, AudioEnd, SessionEnd, SessionStart
+from voice_service.session.store import PlannedQuestion
 from voice_service.speech.stt import BYTES_PER_SECOND
 
 logger = logging.getLogger(__name__)
@@ -66,16 +68,6 @@ class CoreApi(Protocol):
     ) -> None: ...
 
 
-class Retriever(Protocol):
-    async def retrieve(
-        self, repository_id: int, query: str, *, top_k: int, exclude_chunk_ids: list[int]
-    ) -> list[Chunk]: ...
-
-
-class Generator(Protocol):
-    async def generate_question(self, history: list[Exchange], chunks: list[Chunk]) -> str: ...
-
-
 class Transcriber(Protocol):
     async def transcribe(self, pcm: bytes, *, prompt: str) -> str: ...
 
@@ -84,26 +76,21 @@ class Synthesizer(Protocol):
     def synthesize(self, text: str) -> AsyncIterator[bytes]: ...
 
 
-class Turns(Protocol):
-    async def create_turn(
-        self,
-        *,
-        interview_id: int,
-        seq: int,
-        question_text: str,
-        retrieved_chunk_ids: list[int],
-        timings: dict[str, int],
-    ) -> int: ...
-    async def record_answer(self, turn_id: int, answer_text: str) -> None: ...
-    async def add_timings(self, turn_id: int, timings: dict[str, int]) -> None: ...
+class Sessions(Protocol):
+    async def load_plan(self, interview_id: int) -> Sequence[PlannedQuestion] | None: ...
+    async def mark_asked(self, interview_id: int, seq: int) -> None: ...
+    async def record_answer(self, interview_id: int, seq: int, answer: str) -> None: ...
+    async def add_timings(self, interview_id: int, seq: int, timings: dict[str, int]) -> None: ...
 
 
 @dataclass(frozen=True)
 class SessionConfig:
-    max_questions: int
     session_start_timeout_s: float
-    retrieval_top_k: int
     max_answer_seconds: int = 180  # decision 043
+
+
+class _PlanNotReadyError(Exception):
+    """The live page opens the socket only once the plan is ready (decision 052)."""
 
 
 @dataclass(frozen=True)
@@ -120,19 +107,15 @@ class InterviewSession:
         self,
         *,
         core_api: CoreApi,
-        retriever: Retriever,
-        generator: Generator,
         transcriber: Transcriber,
         synthesizer: Synthesizer,
-        turns: Turns,
+        sessions: Sessions,
         config: SessionConfig,
     ) -> None:
         self._core = core_api
-        self._retriever = retriever
-        self._generator = generator
         self._transcriber = transcriber
         self._synthesizer = synthesizer
-        self._turns = turns
+        self._sessions = sessions
         self._config = config
 
     async def run(self, ws: Channel) -> None:
@@ -146,9 +129,24 @@ class InterviewSession:
 
         # From here the interview is `active` in Core API, so every exit
         # path below must report how it ended (decision 041).
-        await ws.send_json(protocol.session_ready(session.interview_id))
         try:
-            outcome = await self._interview(ws, session)
+            plan = await self._sessions.load_plan(session.interview_id)
+            if plan is None:
+                raise _PlanNotReadyError
+            await ws.send_json(protocol.session_ready(session.interview_id))
+            outcome = await self._interview(ws, session.interview_id, plan)
+        except _PlanNotReadyError:
+            # Only the token tells us the interview, so this check can only
+            # come after the consume (decision 052).
+            logger.warning(
+                "interview %s: session started before its plan was ready", session.interview_id
+            )
+            await self._core.send_interview_event(
+                session.interview_id, "interview.interrupted", error_message="plan not ready",
+            )
+            await _safe_send(ws, protocol.error("plan_not_ready", "the interview isn't ready yet"))
+            await _safe_close(ws, _CLOSE_POLICY_VIOLATION)
+            return
         except WebSocketDisconnect:
             logger.info("interview %s: client disconnected", session.interview_id)
             await self._core.send_interview_event(
@@ -203,80 +201,40 @@ class InterviewSession:
             await _safe_close(ws, _CLOSE_INTERNAL_ERROR, _GENERIC_ADMISSION_FAILURE)
             return None
 
-    async def _interview(self, ws: Channel, session: ConsumedSession) -> Outcome:
-        history: list[Exchange] = []
-        used_chunk_ids: list[int] = []
-        query = OPENING_SEED_QUERY  # decision 042
+    async def _interview(
+        self, ws: Channel, interview_id: int, plan: Sequence[PlannedQuestion]
+    ) -> Outcome:
+        for question in plan:
+            seq = question.seq
+            # 1. Persist before sending, so an interruption still records it.
+            await self._sessions.mark_asked(interview_id, seq)
 
-        for seq in range(1, self._config.max_questions + 1):
-            # 1. Retrieve fresh context, steering away from code already used.
-            t0 = time.perf_counter()
-            chunks = await self._retriever.retrieve(
-                session.repository_id, query,
-                top_k=self._config.retrieval_top_k,
-                exclude_chunk_ids=used_chunk_ids,
-            )
-            t1 = time.perf_counter()
-            if not chunks:
-                logger.warning(
-                    "interview %s turn %s: retrieval returned no chunks",
-                    session.interview_id, seq,
-                )
-
-            # 2. Generate the question.
-            question = await self._generator.generate_question(history, chunks)
-            t2 = time.perf_counter()
-
-            # 3. Persist before sending, so an interruption still records it.
-            chunk_ids = [c.id for c in chunks]
-            timings = {"retrieval_ms": _ms(t0, t1), "llm_ms": _ms(t1, t2)}
-            turn_id = await self._turns.create_turn(
-                interview_id=session.interview_id,
-                seq=seq,
-                question_text=question,
-                retrieved_chunk_ids=chunk_ids,
-                timings=timings,
-            )
-            used_chunk_ids.extend(chunk_ids)
-            # Per-stage timing log (decision 034's consequence).
+            # 2. Ask: the text first (captions), then the spoken question.
+            await ws.send_json(protocol.question_text(seq, question.text))
+            tts_timings = await self._speak(ws, seq, question.text)
+            await self._sessions.add_timings(interview_id, seq, tts_timings)
             logger.info(
-                "interview %s turn %s: retrieval=%sms llm=%sms chunks=%s",
-                session.interview_id, seq, timings["retrieval_ms"], timings["llm_ms"],
-                len(chunk_ids),
+                "interview %s question %s: tts_first_byte=%sms tts=%sms",
+                interview_id, seq, tts_timings["tts_first_byte_ms"], tts_timings["tts_ms"],
             )
 
-            # 4. Ask: the text first (captions), then the spoken question.
-            await ws.send_json(protocol.question_text(turn_id, seq, question))
-            tts_timings = await self._speak(ws, turn_id, question)
-            await self._turns.add_timings(turn_id, tts_timings)
-            logger.info(
-                "interview %s turn %s: tts_first_byte=%sms tts=%sms",
-                session.interview_id, seq,
-                tts_timings["tts_first_byte_ms"], tts_timings["tts_ms"],
-            )
-
-            # 5. Wait for the answer (or the client ending the session).
-            reply = await self._await_answer(ws, question)
+            # 3. Wait for the answer (or the client ending the session).
+            reply = await self._await_answer(ws, question.text)
             if isinstance(reply, SessionEnd):
                 return "ended_by_client"
 
             if reply.stt_ms is not None:
-                # Show what we heard: a misheard answer explains an odd follow-up.
-                await ws.send_json(protocol.transcript_final(turn_id, reply.text))
-            await self._turns.record_answer(turn_id, reply.text)
+                # Show what we heard, so a misheard answer is visible.
+                await ws.send_json(protocol.transcript_final(seq, reply.text))
+            await self._sessions.record_answer(interview_id, seq, reply.text)
             if reply.stt_ms is not None:
-                await self._turns.add_timings(turn_id, {"stt_ms": reply.stt_ms})
-                logger.info(
-                    "interview %s turn %s: stt=%sms", session.interview_id, seq, reply.stt_ms
-                )
-            await ws.send_json(protocol.turn_complete(turn_id))
-
-            history.append(Exchange(question=question, answer=reply.text))
-            query = f"{question}\n{reply.text}"  # decision 042
+                await self._sessions.add_timings(interview_id, seq, {"stt_ms": reply.stt_ms})
+                logger.info("interview %s question %s: stt=%sms", interview_id, seq, reply.stt_ms)
+            await ws.send_json(protocol.turn_complete(seq))
 
         return "completed"
 
-    async def _speak(self, ws: Channel, turn_id: int, question: str) -> dict[str, int]:
+    async def _speak(self, ws: Channel, seq: int, question: str) -> dict[str, int]:
         """Stream the question's audio to the client as binary frames.
 
         Each chunk is forwarded the moment it arrives, so playback starts
@@ -291,7 +249,7 @@ class InterviewSession:
                 first_byte = time.perf_counter()
             await ws.send_bytes(chunk)
         end = time.perf_counter()
-        await ws.send_json(protocol.question_audio_end(turn_id))
+        await ws.send_json(protocol.question_audio_end(seq))
         return {"tts_first_byte_ms": _ms(t0, first_byte or end), "tts_ms": _ms(t0, end)}
 
     async def _await_answer(self, ws: Channel, question: str) -> _Answer | SessionEnd:
