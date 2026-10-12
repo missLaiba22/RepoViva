@@ -4,6 +4,7 @@ import json
 
 import httpx
 import pytest
+from repoviva_common.hmac_auth import SIGNATURE_HEADER, TIMESTAMP_HEADER, verify
 
 from core_api.config import get_settings
 from core_api.interviews import evaluation_client
@@ -13,7 +14,6 @@ from core_api.interviews.evaluation_client import (
     trigger_report,
     trigger_report_logged,
 )
-from core_api.security.hmac_auth import SIGNATURE_HEADER, TIMESTAMP_HEADER, verify
 
 
 def transport(status_code=200, json_body=None, seen=None):

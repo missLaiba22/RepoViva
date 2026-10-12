@@ -6,55 +6,28 @@ All requests here carry an HMAC signature (decision 027) verified by
 with 401.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from repoviva_common.dependencies import hmac_dependency
 from sqlalchemy.orm import Session
 
 from core_api.config import get_settings
 from core_api.db import get_db
-from core_api.interviews import service as interviews_service
-from core_api.interviews.evaluation_client import trigger_report_logged
 from core_api.internal.schemas import (
     IngestionEventBody,
     InterviewEventBody,
     SessionTokenConsumeBody,
     SessionTokenConsumeResponse,
 )
+from core_api.interviews import service as interviews_service
+from core_api.interviews.evaluation_client import trigger_report_logged
 from core_api.repositories import service as repositories_service
 from core_api.repositories.service import IllegalTransitionError
-from core_api.security.hmac_auth import (
-    SIGNATURE_HEADER,
-    TIMESTAMP_HEADER,
-    HmacVerificationError,
-    verify,
-)
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
 
 
-async def verify_hmac(request: Request) -> None:
-    """FastAPI dependency: verify HMAC signature on inbound internal requests.
-
-    Reads the raw body bytes — the signature covers exactly what was sent,
-    not what Pydantic parses later. `await request.body()` caches the bytes,
-    so the route handler still sees the parsed model.
-    """
-    body = await request.body()
-    settings = get_settings()
-    try:
-        verify(
-            body=body,
-            timestamp_header=request.headers.get(TIMESTAMP_HEADER),
-            signature_header=request.headers.get(SIGNATURE_HEADER),
-            secret=settings.internal_hmac_secret,
-        )
-    except HmacVerificationError as exc:
-        # Specific reason logged server-side; caller gets a generic 401
-        # (mirrors the discipline in repository-service).
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="unauthorized",
-        ) from exc
+verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
 
 
 @router.post(

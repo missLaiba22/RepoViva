@@ -1,15 +1,8 @@
-"""HMAC-SHA256 signing and verification for Voice Service's internal calls.
+"""HMAC-SHA256 signing and verification for internal calls (decision 027).
 
-Wire format (decision 027):
     signature = HMAC_SHA256(secret, f"{timestamp}.{body}")
-    headers:
-        X-Repoviva-Timestamp: <unix seconds>
-        X-Repoviva-Signature: sha256=<hex digest>
-
-Written again here on purpose rather than shared as a package ("write it
-twice, deliberately" — the wire format is the contract). Signing covers
-outbound calls to Core API and Repository Service; verification covers
-the inbound turns endpoint Evaluation Service calls (decision 049).
+    X-Repoviva-Timestamp: <unix seconds>
+    X-Repoviva-Signature: sha256=<hex digest>
 """
 
 from __future__ import annotations
@@ -22,8 +15,7 @@ TIMESTAMP_HEADER = "X-Repoviva-Timestamp"
 SIGNATURE_HEADER = "X-Repoviva-Signature"
 SIGNATURE_PREFIX = "sha256="
 
-# Freshness window (decision 027): older requests are rejected so a
-# captured signature can't be replayed.
+# Older requests are rejected so a captured signature can't be replayed.
 MAX_AGE_SECONDS = 60
 
 
@@ -37,11 +29,7 @@ def _digest(secret: str, timestamp: str, body: bytes) -> str:
 
 
 def sign(*, body: bytes, secret: str, timestamp: int | None = None) -> dict[str, str]:
-    """Return the two headers to attach to a request carrying exactly `body`.
-
-    `body` must be the bytes that go on the wire — sign and send the same
-    bytes, or the receiver's check fails.
-    """
+    """Headers for a request carrying exactly `body` (the bytes sent on the wire)."""
     ts = str(timestamp if timestamp is not None else int(time.time()))
     return {
         TIMESTAMP_HEADER: ts,
@@ -57,11 +45,7 @@ def verify(
     secret: str,
     now: int | None = None,
 ) -> None:
-    """Raise HmacVerificationError unless the headers sign `body` and are fresh.
-
-    `body` is the raw bytes as received (empty for a GET), never re-serialized
-    JSON.
-    """
+    """Raise HmacVerificationError unless the headers sign the raw `body` and are fresh."""
     if timestamp_header is None or signature_header is None:
         raise HmacVerificationError("missing signature headers")
     try:

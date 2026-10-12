@@ -13,21 +13,15 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
-    Request,
     status,
 )
 from pydantic import BaseModel, Field
+from repoviva_common.dependencies import hmac_dependency
 
 from repository_service.config import Settings, get_settings
 from repository_service.db import get_db_pool
 from repository_service.indexing.embedder import EMBEDDER
 from repository_service.ingestion.orchestrator import run_ingestion
-from repository_service.internal.hmac_auth import (
-    SIGNATURE_HEADER,
-    TIMESTAMP_HEADER,
-    HmacVerificationError,
-    verify,
-)
 from repository_service.retrieval import get_chunks_by_ids, search_chunks
 
 logger = logging.getLogger(__name__)
@@ -52,30 +46,7 @@ class ChunksByIdBody(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=200)
 
 
-async def verify_hmac(request: Request) -> None:
-    """FastAPI dependency: verify the HMAC signature on an inbound request.
-
-    Reads the raw body bytes (not the parsed JSON) — the signature covers
-    exactly what was sent on the wire, not what Pydantic parses out of it.
-    Raises HTTPException(401) on any verification failure.
-
-    Note: `await request.body()` caches the bytes, so the route handler
-    can still parse the body into its Pydantic model afterwards.
-    """
-    body = await request.body()
-    settings = get_settings()
-    try:
-        verify(
-            body=body,
-            timestamp_header=request.headers.get(TIMESTAMP_HEADER),
-            signature_header=request.headers.get(SIGNATURE_HEADER),
-            secret=settings.internal_hmac_secret,
-        )
-    except HmacVerificationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="unauthorized",
-        ) from exc
+verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
 
 
 @router.post(

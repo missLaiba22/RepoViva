@@ -14,9 +14,9 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
+from repoviva_common.hmac_auth import sign
 
 from voice_service.config import get_settings
-from voice_service.internal.hmac_auth import sign
 
 logger = logging.getLogger(__name__)
 

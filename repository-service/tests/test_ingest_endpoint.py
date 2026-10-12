@@ -11,7 +11,7 @@ Two reasons:
   run_ingestion with the right args." That is directly observable by
   inspecting the BackgroundTasks object we pass in — no client needed.
 
-HMAC verification is not exercised here — it's covered by the hmac_auth
+HMAC verification is not exercised here — it's covered by repoviva-common's
 tests. Calling the handler function directly bypasses dependency
 resolution entirely, which is what we want for a unit-level check.
 """

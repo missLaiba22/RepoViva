@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "RepoViva Voice Service: runs the live interview session"
 requires-python = ">=3.11"
 dependencies = [
+    # Shared internal-call infrastructure (decision 054)
+    "repoviva-common",
     # Web framework (WebSocket support comes with uvicorn[standard])
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -36,6 +38,9 @@ target-version = "py311"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.uv.sources]
+repoviva-common = { path = "../libs/repoviva-common", editable = true }
 
 [build-system]
 requires = ["hatchling"]

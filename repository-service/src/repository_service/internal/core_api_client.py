@@ -15,9 +15,9 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from repoviva_common.hmac_auth import sign
 
 from repository_service.config import get_settings
-from repository_service.internal.hmac_auth import sign
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,7 @@ class CoreApiClient:
         # so we never sign one byte-sequence and send a different one.
         body_bytes = json.dumps(body_dict, separators=(",", ":")).encode()
 
-        signed = sign(body=body_bytes, secret=self._secret)
-        headers = {"Content-Type": "application/json", **signed.as_dict()}
+        headers = {"Content-Type": "application/json", **sign(body=body_bytes, secret=self._secret)}
 
         url = self._base_url + _EVENTS_PATH.format(repository_id=repository_id)
 

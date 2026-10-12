@@ -6,9 +6,9 @@ import json
 from dataclasses import dataclass
 
 import httpx
+from repoviva_common.hmac_auth import sign
 
 from voice_service.config import get_settings
-from voice_service.internal.hmac_auth import sign
 
 _RETRIEVE_PATH = "/internal/v1/repositories/{repository_id}/retrieve"
 

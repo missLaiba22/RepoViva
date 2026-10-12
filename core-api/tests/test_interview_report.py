@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from repoviva_common.hmac_auth import sign
 
 from core_api.auth.dependencies import get_current_user
 from core_api.config import get_settings
@@ -17,7 +18,6 @@ from core_api.internal import router as internal_router
 from core_api.interviews import evaluation_client
 from core_api.interviews import router as interviews_router
 from core_api.main import app
-from core_api.security.hmac_auth import sign
 
 READY = {
     "interview_id": 7,
@@ -245,7 +245,7 @@ def _post_event(client, event_type):
             "occurred_at": "2026-10-08T12:00:00Z",
         }
     ).encode()
-    headers = sign(body=body, secret=get_settings().internal_hmac_secret).as_dict()
+    headers = sign(body=body, secret=get_settings().internal_hmac_secret)
     return client.post(
         "/internal/v1/interviews/7/events",
         content=body,

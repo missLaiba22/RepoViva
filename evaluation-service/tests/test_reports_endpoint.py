@@ -10,10 +10,10 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
+from repoviva_common.hmac_auth import sign
 
 from evaluation_service.config import get_settings
 from evaluation_service.internal import router
-from evaluation_service.internal.hmac_auth import sign
 from evaluation_service.main import app
 from evaluation_service.reports import PendingReport
 from tests.fakes import FakeReportStore

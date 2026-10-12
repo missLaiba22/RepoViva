@@ -8,10 +8,10 @@ import time
 
 import httpx
 import pytest
+from repoviva_common.hmac_auth import SIGNATURE_HEADER, TIMESTAMP_HEADER, verify
 
 from evaluation_service.clients.repository import MAX_IDS_PER_CALL, RepositoryClient
 from evaluation_service.clients.voice import Turn, VoiceClient
-from evaluation_service.internal.hmac_auth import SIGNATURE_HEADER, TIMESTAMP_HEADER, verify
 
 SECRET = "s3cret"
 

@@ -6,32 +6,17 @@ short-circuits with 401 before the handler runs.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends
+from repoviva_common.dependencies import hmac_dependency
 
 from voice_service.config import get_settings
 from voice_service.db import get_db_pool
-from voice_service.internal.hmac_auth import (
-    SIGNATURE_HEADER,
-    TIMESTAMP_HEADER,
-    HmacVerificationError,
-    verify,
-)
 from voice_service.session.turns import TurnStore
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
 
 
-async def verify_hmac(request: Request) -> None:
-    """FastAPI dependency: 401 unless the request is signed with the shared secret."""
-    try:
-        verify(
-            body=await request.body(),
-            timestamp_header=request.headers.get(TIMESTAMP_HEADER),
-            signature_header=request.headers.get(SIGNATURE_HEADER),
-            secret=get_settings().internal_hmac_secret,
-        )
-    except HmacVerificationError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized") from exc
+verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
 
 
 @router.get(

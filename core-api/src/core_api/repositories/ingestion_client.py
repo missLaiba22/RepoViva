@@ -11,9 +11,9 @@ from __future__ import annotations
 import json
 
 import httpx
+from repoviva_common.hmac_auth import sign
 
 from core_api.config import get_settings
-from core_api.security.hmac_auth import sign
 
 
 class IngestionTriggerError(Exception):
@@ -55,7 +55,7 @@ def trigger_ingestion(*, repository_id: int, github_url: str) -> None:
     body_bytes = json.dumps(body_dict, separators=(",", ":")).encode()
 
     headers = {"Content-Type": "application/json"}
-    headers.update(sign(body=body_bytes, secret=settings.internal_hmac_secret).as_dict())
+    headers.update(sign(body=body_bytes, secret=settings.internal_hmac_secret))
 
     try:
         response = httpx.post(url, content=body_bytes, headers=headers, timeout=_TIMEOUT_SECONDS)

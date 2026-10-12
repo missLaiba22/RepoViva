@@ -6,9 +6,9 @@ import json
 from dataclasses import dataclass
 
 import httpx
+from repoviva_common.hmac_auth import sign
 
 from evaluation_service.config import get_settings
-from evaluation_service.internal.hmac_auth import sign
 
 _CHUNKS_PATH = "/internal/v1/repositories/{repository_id}/chunks"
 

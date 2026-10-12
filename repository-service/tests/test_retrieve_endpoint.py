@@ -3,7 +3,7 @@
 
 Same approach as test_ingest_endpoint.py: call the handler function
 directly, bypassing HMAC dependency resolution (covered separately by
-test_hmac_auth.py). EMBEDDER.embed and search_chunks are monkeypatched so
+repoviva-common's tests). EMBEDDER.embed and search_chunks are monkeypatched so
 these tests never touch a real Postgres or Voyage.
 """
 

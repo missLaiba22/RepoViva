@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "RepoViva Evaluation Service: grades a finished interview and writes its report"
 requires-python = ">=3.11"
 dependencies = [
+    # Shared internal-call infrastructure (decision 054)
+    "repoviva-common",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     # Data validation & settings; pydantic also validates the grader's JSON (decision 050)
@@ -30,6 +32,9 @@ target-version = "py311"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.uv.sources]
+repoviva-common = { path = "../libs/repoviva-common", editable = true }
 
 [build-system]
 requires = ["hatchling"]

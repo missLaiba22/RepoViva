@@ -449,7 +449,7 @@ Every internal service-to-service HTTP call is authenticated with an HMAC-SHA256
 
 The receiver rejects requests older than 60 seconds and verifies the signature with a constant-time comparison (`hmac.compare_digest`). A single shared secret (`INTERNAL_HMAC_SECRET`) is used across all internal calls in both directions.
 
-Per the "write it twice, deliberately" approach chosen in slice 2, each service implements the HMAC module independently — the wire format is the contract, not the code. Same wire format, independent implementations.
+~~Per the "write it twice, deliberately" approach chosen in slice 2, each service implements the HMAC module independently — the wire format is the contract, not the code. Same wire format, independent implementations.~~ *Replaced by decision 054: one shared implementation in `libs/repoviva-common`.*
 
 **Why:**
 Our internal callbacks are structurally webhooks, and HMAC is the pattern the webhook industry has converged on (GitHub, Stripe, Slack, Shopify). It provides authenticity, body integrity, and — with the timestamp in the signed payload — replay protection, without the operational cost of mTLS or the machinery of an OAuth server. A 60-second freshness window is honest for services on the same Docker network; clock skew is negligible, and no legitimate callback takes that long.
@@ -2228,3 +2228,51 @@ read.*
   (its own 200k bucket, but check the sanity set first), or a shorter
   prompt.
 - Groq retires the model.
+
+---
+
+## 054 — Shared `repoviva-common` package for internal-call infrastructure
+
+*Amends decision 027 (replaces its "write it twice, deliberately" paragraph).*
+
+*Status: decided and implemented 2026-10-12.*
+
+**Decision:**
+HMAC signing and verification live in one package, `libs/repoviva-common`
+(import name `repoviva_common`). Each service installs it as a uv path
+dependency:
+
+    [tool.uv.sources]
+    repoviva-common = { path = "../libs/repoviva-common", editable = true }
+
+It holds:
+- `hmac_auth`: `sign()` returning the two headers as a `dict`, `verify()`,
+  and the header constants. The wire format is unchanged (decision 027).
+- `dependencies.hmac_dependency(get_secret)`: the FastAPI dependency that
+  returns 401 for an unsigned or invalid request.
+
+The package holds infrastructure only: HMAC now, and later the HTTP client
+factory and request-ID middleware. Never domain models, DB code or
+business logic.
+
+**Why:**
+The four copies had already drifted: two returned a `SignedHeaders`
+object, two a `dict`, and `verify_hmac` was written out in every router.
+Every new signed call (the question-planning trigger, decision 052) would
+have meant a fifth copy. The wire format is already a contract shared by
+all services, so sharing its implementation adds no new coupling.
+
+**Options considered:**
+- Keep independent copies (decision 027). Full independence, but every fix
+  touches four files and the copies keep drifting.
+- Publish the package to a private index. Real versioning, but it's setup
+  a single repository doesn't need.
+
+**Tradeoff:**
+- A change to the package reaches every service at once.
+- Docker builds need the repository root as build context, so that each
+  image can include `libs/`. This matters at the AWS step.
+
+**Revisit when:**
+A service moves to its own repository or another language. It then
+implements the documented wire format itself.

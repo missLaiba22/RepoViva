@@ -9,10 +9,10 @@ from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
+from repoviva_common.hmac_auth import sign
 
 from voice_service.config import get_settings
 from voice_service.internal import router
-from voice_service.internal.hmac_auth import sign
 from voice_service.main import app
 from voice_service.session.turns import TurnStore
 

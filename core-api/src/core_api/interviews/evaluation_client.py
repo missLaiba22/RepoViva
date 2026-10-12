@@ -13,9 +13,9 @@ import logging
 from typing import Literal
 
 import httpx
+from repoviva_common.hmac_auth import sign
 
 from core_api.config import get_settings
-from core_api.security.hmac_auth import sign
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def trigger_report(
         separators=(",", ":"),
     ).encode()
     headers = {"Content-Type": "application/json"}
-    headers.update(sign(body=body_bytes, secret=settings.internal_hmac_secret).as_dict())
+    headers.update(sign(body=body_bytes, secret=settings.internal_hmac_secret))
 
     try:
         with httpx.Client(timeout=_TIMEOUT_SECONDS, transport=transport) as client:
@@ -98,7 +98,7 @@ def get_report(
     """
     settings = get_settings()
     # A GET has no body, so the signature covers the empty byte string.
-    headers = sign(body=b"", secret=settings.internal_hmac_secret).as_dict()
+    headers = sign(body=b"", secret=settings.internal_hmac_secret)
 
     try:
         with httpx.Client(timeout=_TIMEOUT_SECONDS, transport=transport) as client:

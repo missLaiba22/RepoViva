@@ -2,7 +2,7 @@
 """Tests for POST /internal/v1/repositories/{id}/chunks (decision 049).
 
 Same approach as test_retrieve_endpoint.py: call the handler directly,
-bypassing HMAC (covered by test_hmac_auth.py), with the DB call
+bypassing HMAC (covered by repoviva-common's tests), with the DB call
 monkeypatched. The lookup's SQL arguments are checked with a fake pool.
 """
 

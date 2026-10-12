@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "RepoViva Repository Service: repository ingestion and retrieval"
 requires-python = ">=3.11"
 dependencies = [
+    # Shared internal-call infrastructure (decision 054)
+    "repoviva-common",
     # Web framework
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -36,6 +38,9 @@ asyncio_mode = "auto"              # NEW — no need for @pytest.mark.asyncio
 markers = [                        # NEW
     "integration: hits real external services (network, GitHub, etc.)",
 ]
+
+[tool.uv.sources]
+repoviva-common = { path = "../libs/repoviva-common", editable = true }
 
 [build-system]
 requires = ["hatchling"]
