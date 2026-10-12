@@ -1,6 +1,6 @@
 from urllib.parse import urlencode
 
-import httpx
+from repoviva_common.http import get_sync_client
 
 from core_api.config import get_settings
 
@@ -27,7 +27,7 @@ def build_authorize_url(state: str) -> str:
 def exchange_code_for_token(code: str) -> str:
     """POST the code to GitHub, get back an access token."""
     settings = get_settings()
-    response = httpx.post(
+    response = get_sync_client().post(
         GITHUB_TOKEN_URL,
         data={
             "client_id": settings.github_client_id,
@@ -49,7 +49,7 @@ def exchange_code_for_token(code: str) -> str:
 
 def fetch_github_user(access_token: str) -> dict:
     """Get the user's GitHub profile."""
-    response = httpx.get(
+    response = get_sync_client().get(
         GITHUB_USER_URL,
         headers={
             "Authorization": f"Bearer {access_token}",

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import httpx
 from repoviva_common.hmac_auth import sign
+from repoviva_common.http import get_async_client
 
 from evaluation_service.config import get_settings
 
@@ -31,21 +32,20 @@ class VoiceClient:
         base_url: str,
         secret: str,
         *,
+        http: httpx.AsyncClient,
         timeout: float = _TIMEOUT_SECONDS,
-        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._secret = secret
         self._timeout = timeout
-        self._transport = transport
+        self._http = http
 
     async def get_turns(self, interview_id: int) -> list[Turn]:
         """Turns ordered by seq. Raises httpx.HTTPError on any failure."""
         url = self._base_url + _TURNS_PATH.format(interview_id=interview_id)
         # A GET has no body, so the signature covers the empty byte string.
         headers = sign(body=b"", secret=self._secret)
-        async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
-            resp = await client.get(url, headers=headers)
+        resp = await self._http.get(url, headers=headers, timeout=self._timeout)
         resp.raise_for_status()
         return [
             Turn(
@@ -61,4 +61,6 @@ class VoiceClient:
 
 def get_voice_client() -> VoiceClient:
     settings = get_settings()
-    return VoiceClient(settings.voice_service_base_url, settings.internal_hmac_secret)
+    return VoiceClient(
+        settings.voice_service_base_url, settings.internal_hmac_secret, http=get_async_client()
+    )

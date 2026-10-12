@@ -14,6 +14,7 @@ from typing import Literal
 
 import httpx
 from repoviva_common.hmac_auth import sign
+from repoviva_common.http import get_sync_client
 
 from core_api.config import get_settings
 
@@ -43,7 +44,7 @@ def trigger_report(
     interview_id: int,
     repository_id: int,
     outcome: ReportOutcome,
-    transport: httpx.BaseTransport | None = None,
+    http: httpx.Client | None = None,
 ) -> None:
     """Ask Evaluation Service to generate the interview's report.
 
@@ -60,10 +61,12 @@ def trigger_report(
     headers.update(sign(body=body_bytes, secret=settings.internal_hmac_secret))
 
     try:
-        with httpx.Client(timeout=_TIMEOUT_SECONDS, transport=transport) as client:
-            response = client.post(
-                f"{_base_url()}/internal/v1/reports", content=body_bytes, headers=headers
-            )
+        response = (http or get_sync_client()).post(
+            f"{_base_url()}/internal/v1/reports",
+            content=body_bytes,
+            headers=headers,
+            timeout=_TIMEOUT_SECONDS,
+        )
     except httpx.HTTPError as exc:
         raise EvaluationServiceError(f"could not reach Evaluation Service: {exc}") from exc
 
@@ -89,9 +92,7 @@ def trigger_report_logged(*, interview_id: int, repository_id: int, outcome: Rep
         )
 
 
-def get_report(
-    interview_id: int, *, transport: httpx.BaseTransport | None = None
-) -> dict | None:
+def get_report(interview_id: int, *, http: httpx.Client | None = None) -> dict | None:
     """The report as Evaluation Service holds it, or None if there is none.
 
     Raises EvaluationServiceError on anything other than 200 or 404.
@@ -101,8 +102,11 @@ def get_report(
     headers = sign(body=b"", secret=settings.internal_hmac_secret)
 
     try:
-        with httpx.Client(timeout=_TIMEOUT_SECONDS, transport=transport) as client:
-            response = client.get(f"{_base_url()}/internal/v1/reports/{interview_id}", headers=headers)
+        response = (http or get_sync_client()).get(
+            f"{_base_url()}/internal/v1/reports/{interview_id}",
+            headers=headers,
+            timeout=_TIMEOUT_SECONDS,
+        )
     except httpx.HTTPError as exc:
         raise EvaluationServiceError(f"could not reach Evaluation Service: {exc}") from exc
 

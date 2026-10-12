@@ -2276,3 +2276,52 @@ all services, so sharing its implementation adds no new coupling.
 **Revisit when:**
 A service moves to its own repository or another language. It then
 implements the documented wire format itself.
+
+---
+
+## 055 — One long-lived HTTP client per service
+
+*Status: decided and implemented 2026-10-12.*
+
+**Decision:**
+Each service makes every outbound HTTP call (internal services, Deepgram,
+GitHub) through **one client**, opened in its FastAPI lifespan and closed
+on shutdown. `repoviva-common/http.py` (decision 054) provides:
+
+- `create_async_client()` / `create_sync_client()`: default timeout
+  (10 s, 3 s to connect), connection limits, and one retry of a **failed
+  connection attempt only** (the request never reached the server, so it's
+  safe for any method).
+- `open_*` / `get_*` / `close_*` for the process's one client, the same
+  shape as each service's `db.py` pool. `get_*` raises before startup.
+
+Async services use `httpx.AsyncClient`. **Core API uses `httpx.Client`**:
+its routes and SQLAlchemy are sync, and `httpx.Client` is thread-safe.
+Converting Core API to async is a separate decision, with no measured need.
+
+Client classes receive the client in their constructor (`http=`); Core
+API's module functions take an optional `http=`. Tests inject an httpx
+client with a `MockTransport`. Per-call timeouts stay where they were,
+passed on each request.
+
+**Why:**
+Every call opened and closed its own client: a new TCP connection each
+time and, for Deepgram, a new TLS handshake for every spoken question,
+on the interview's latency path (decision 006). One client keeps
+connections open and puts timeouts and retries in one place.
+
+**Relation to message queues:**
+Queues will replace only the fire-and-forget calls (`trigger_ingestion`,
+`trigger_report`, ingestion and interview events). The request/response
+calls (token consume, retrieval, turns, chunks, report reads, Deepgram,
+GitHub) stay HTTP, and queue workers will make their HTTP calls through
+this same client. So this does not get reworked when queues arrive.
+
+**Tradeoff:**
+- The client is process-global state, like the DB pool.
+- Code that runs without the lifespan (a script, a test that doesn't
+  inject a client) fails with a clear error instead of working silently.
+
+**Revisit when:**
+Core API becomes async (switch it to `AsyncClient`), or a dependency needs
+its own limits or retry policy (give it its own client).

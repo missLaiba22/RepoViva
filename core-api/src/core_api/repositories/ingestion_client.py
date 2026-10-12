@@ -12,6 +12,7 @@ import json
 
 import httpx
 from repoviva_common.hmac_auth import sign
+from repoviva_common.http import get_sync_client
 
 from core_api.config import get_settings
 
@@ -58,7 +59,9 @@ def trigger_ingestion(*, repository_id: int, github_url: str) -> None:
     headers.update(sign(body=body_bytes, secret=settings.internal_hmac_secret))
 
     try:
-        response = httpx.post(url, content=body_bytes, headers=headers, timeout=_TIMEOUT_SECONDS)
+        response = get_sync_client().post(
+            url, content=body_bytes, headers=headers, timeout=_TIMEOUT_SECONDS
+        )
     except httpx.HTTPError as exc:
         raise IngestionTriggerError(f"could not reach Repository Service: {exc}") from exc
 

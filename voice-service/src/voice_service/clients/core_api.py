@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import httpx
 from repoviva_common.hmac_auth import sign
+from repoviva_common.http import get_async_client
 
 from voice_service.config import get_settings
 
@@ -53,19 +54,20 @@ class CoreApiClient:
         base_url: str,
         secret: str,
         *,
+        http: httpx.AsyncClient,
         timeout: float = _TIMEOUT_SECONDS,
-        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._secret = secret
         self._timeout = timeout
-        self._transport = transport
+        self._http = http
 
     async def _post(self, path: str, body: dict[str, Any]) -> httpx.Response:
         body_bytes = json.dumps(body, separators=(",", ":")).encode()
         headers = {"Content-Type": "application/json", **sign(body=body_bytes, secret=self._secret)}
-        async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
-            return await client.post(self._base_url + path, content=body_bytes, headers=headers)
+        return await self._http.post(
+            self._base_url + path, content=body_bytes, headers=headers, timeout=self._timeout
+        )
 
     async def consume_token(self, token: str) -> ConsumedSession:
         """Exchange the client's token for its interview (decision 035).
@@ -123,4 +125,6 @@ class CoreApiClient:
 
 def get_core_api_client() -> CoreApiClient:
     settings = get_settings()
-    return CoreApiClient(settings.core_api_base_url, settings.internal_hmac_secret)
+    return CoreApiClient(
+        settings.core_api_base_url, settings.internal_hmac_secret, http=get_async_client()
+    )

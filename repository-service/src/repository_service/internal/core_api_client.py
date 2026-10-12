@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import httpx
 from repoviva_common.hmac_auth import sign
+from repoviva_common.http import get_async_client
 
 from repository_service.config import get_settings
 
@@ -32,9 +33,7 @@ _TIMEOUT_SECONDS = 5.0
 class CoreApiClient:
     """Emits ingestion-status events to Core API.
 
-    Constructed once per orchestrator run (or per process — either works;
-    httpx.AsyncClient is created fresh per call for simplicity). Injectable
-    transport for tests.
+    Uses the service's shared httpx client (decision 055).
     """
 
     def __init__(
@@ -42,13 +41,13 @@ class CoreApiClient:
         base_url: str,
         secret: str,
         *,
+        http: httpx.AsyncClient,
         timeout: float = _TIMEOUT_SECONDS,
-        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._secret = secret
         self._timeout = timeout
-        self._transport = transport
+        self._http = http
 
     async def emit_event(
         self,
@@ -86,12 +85,10 @@ class CoreApiClient:
         url = self._base_url + _EVENTS_PATH.format(repository_id=repository_id)
 
         try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout,
-                transport=self._transport,
-            ) as client:
-                resp = await client.post(url, content=body_bytes, headers=headers)
-                resp.raise_for_status()
+            resp = await self._http.post(
+                url, content=body_bytes, headers=headers, timeout=self._timeout
+            )
+            resp.raise_for_status()
         except httpx.HTTPError:
             # Best-effort — log and swallow. The alternative (raising)
             # would kill the orchestrator's ability to keep going, which
@@ -105,4 +102,6 @@ class CoreApiClient:
 def get_core_api_client() -> CoreApiClient:
     """Factory used by the orchestrator — reads settings once per call."""
     settings = get_settings()
-    return CoreApiClient(settings.core_api_base_url, settings.internal_hmac_secret)
+    return CoreApiClient(
+        settings.core_api_base_url, settings.internal_hmac_secret, http=get_async_client()
+    )

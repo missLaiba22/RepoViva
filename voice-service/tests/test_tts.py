@@ -14,8 +14,8 @@ async def _body(*chunks):
 
 
 def _synth(handler):
-    return DeepgramSynthesizer(api_key="dg", voice="aura-2-x",
-                               transport=httpx.MockTransport(handler))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return DeepgramSynthesizer(api_key="dg", voice="aura-2-x", http=http)
 
 
 async def test_synthesize_requests_raw_pcm_and_yields_chunks():

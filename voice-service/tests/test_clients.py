@@ -30,7 +30,8 @@ def _assert_signed(request: httpx.Request) -> None:
 
 
 def _core(handler) -> CoreApiClient:
-    return CoreApiClient("http://core.test/", _SECRET, transport=httpx.MockTransport(handler))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return CoreApiClient("http://core.test/", _SECRET, http=http)
 
 
 async def test_consume_token_returns_session():
@@ -95,7 +96,8 @@ async def test_retrieve_sends_exclusions_and_parses_chunks():
             "start_line": 1, "end_line": 2, "language": "python", "similarity": 0.8,
         }]})
 
-    client = RepositoryClient("http://repo.test", _SECRET, transport=httpx.MockTransport(handler))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = RepositoryClient("http://repo.test", _SECRET, http=http)
     chunks = await client.retrieve(15, "q", top_k=6, exclude_chunk_ids=[1, 2])
     assert [c.id for c in chunks] == [3]
     assert chunks[0].filename == "app/main.py"

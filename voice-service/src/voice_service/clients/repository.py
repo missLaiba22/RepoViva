@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 from repoviva_common.hmac_auth import sign
+from repoviva_common.http import get_async_client
 
 from voice_service.config import get_settings
 
@@ -35,13 +36,13 @@ class RepositoryClient:
         base_url: str,
         secret: str,
         *,
+        http: httpx.AsyncClient,
         timeout: float = _TIMEOUT_SECONDS,
-        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._secret = secret
         self._timeout = timeout
-        self._transport = transport
+        self._http = http
 
     async def retrieve(
         self,
@@ -65,8 +66,7 @@ class RepositoryClient:
         headers = {"Content-Type": "application/json", **sign(body=body_bytes, secret=self._secret)}
         url = self._base_url + _RETRIEVE_PATH.format(repository_id=repository_id)
 
-        async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
-            resp = await client.post(url, content=body_bytes, headers=headers)
+        resp = await self._http.post(url, content=body_bytes, headers=headers, timeout=self._timeout)
         resp.raise_for_status()
 
         return [
@@ -85,4 +85,6 @@ class RepositoryClient:
 
 def get_repository_client() -> RepositoryClient:
     settings = get_settings()
-    return RepositoryClient(settings.repository_service_base_url, settings.internal_hmac_secret)
+    return RepositoryClient(
+        settings.repository_service_base_url, settings.internal_hmac_secret, http=get_async_client()
+    )

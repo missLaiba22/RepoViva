@@ -11,9 +11,8 @@ import logging
 import time
 from dataclasses import dataclass
 
-from evaluation_service.clients.repository import RepositoryClient
-from evaluation_service.clients.voice import VoiceClient
-from evaluation_service.config import get_settings
+from evaluation_service.clients.repository import get_repository_client
+from evaluation_service.clients.voice import get_voice_client
 from evaluation_service.db import get_db_pool
 from evaluation_service.grading.llm import JsonLlm, get_llm
 from evaluation_service.pipeline import ChunkSource, TurnSource, generate_report
@@ -34,13 +33,10 @@ class Dependencies:
 
 
 def default_dependencies() -> Dependencies:
-    settings = get_settings()
     return Dependencies(
         store=ReportStore(get_db_pool()),
-        voice=VoiceClient(settings.voice_service_base_url, settings.internal_hmac_secret),
-        repository=RepositoryClient(
-            settings.repository_service_base_url, settings.internal_hmac_secret
-        ),
+        voice=get_voice_client(),
+        repository=get_repository_client(),
         llm=get_llm(),
     )
 

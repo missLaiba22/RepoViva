@@ -46,7 +46,8 @@ async def test_voice_client_gets_signed_turns():
             },
         )
 
-    client = VoiceClient("http://voice/", SECRET, transport=httpx.MockTransport(handler))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = VoiceClient("http://voice/", SECRET, http=http)
 
     assert await client.get_turns(7) == [
         Turn(seq=1, question_text="Q?", answer_text=None, status="asked", retrieved_chunk_ids=[4, 9])
@@ -55,7 +56,9 @@ async def test_voice_client_gets_signed_turns():
 
 async def test_voice_client_raises_on_error_status():
     client = VoiceClient(
-        "http://voice", SECRET, transport=httpx.MockTransport(lambda r: httpx.Response(401))
+        "http://voice",
+        SECRET,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(401))),
     )
 
     with pytest.raises(httpx.HTTPStatusError):
@@ -89,7 +92,8 @@ async def test_repository_client_batches_dedupes_and_signs():
             },
         )
 
-    client = RepositoryClient("http://repo", SECRET, transport=httpx.MockTransport(handler))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = RepositoryClient("http://repo", SECRET, http=http)
     ids = list(range(1, MAX_IDS_PER_CALL + 51)) + [5, 5]
 
     chunks = await client.get_chunks(15, ids)

@@ -1,4 +1,4 @@
-"""evaluation_client against a mock transport: what it signs, sends and raises."""
+"""evaluation_client against a mocked HTTP client: what it signs, sends and raises."""
 
 import json
 
@@ -16,13 +16,13 @@ from core_api.interviews.evaluation_client import (
 )
 
 
-def transport(status_code=200, json_body=None, seen=None):
+def mock_http(status_code=200, json_body=None, seen=None):
     def handler(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen.append(request)
         return httpx.Response(status_code, json=json_body if json_body is not None else {})
 
-    return httpx.MockTransport(handler)
+    return httpx.Client(transport=httpx.MockTransport(handler))
 
 
 def assert_signed(request: httpx.Request) -> None:
@@ -38,7 +38,7 @@ def test_trigger_posts_signed_body():
     seen = []
 
     trigger_report(
-        interview_id=7, repository_id=15, outcome="interrupted", transport=transport(202, seen=seen)
+        interview_id=7, repository_id=15, outcome="interrupted", http=mock_http(202, seen=seen)
     )
 
     (request,) = seen
@@ -54,7 +54,7 @@ def test_trigger_posts_signed_body():
 
 def test_trigger_raises_on_error_status():
     with pytest.raises(EvaluationServiceError, match="500"):
-        trigger_report(interview_id=7, repository_id=15, outcome="completed", transport=transport(500))
+        trigger_report(interview_id=7, repository_id=15, outcome="completed", http=mock_http(500))
 
 
 def test_trigger_raises_when_unreachable():
@@ -66,7 +66,7 @@ def test_trigger_raises_when_unreachable():
             interview_id=7,
             repository_id=15,
             outcome="completed",
-            transport=httpx.MockTransport(refuse),
+            http=httpx.Client(transport=httpx.MockTransport(refuse)),
         )
 
 
@@ -85,16 +85,16 @@ def test_get_report_returns_json_and_signs_empty_body():
     seen = []
     report = {"interview_id": 7, "status": "ready"}
 
-    assert get_report(7, transport=transport(200, report, seen)) == report
+    assert get_report(7, http=mock_http(200, report, seen)) == report
     assert seen[0].url.path == "/internal/v1/reports/7"
     assert_signed(seen[0])
 
 
 def test_get_report_404_is_none():
-    assert get_report(7, transport=transport(404)) is None
+    assert get_report(7, http=mock_http(404)) is None
 
 
 @pytest.mark.parametrize("code", [401, 500, 503])
 def test_get_report_raises_on_other_status(code):
     with pytest.raises(EvaluationServiceError):
-        get_report(7, transport=transport(code))
+        get_report(7, http=mock_http(code))

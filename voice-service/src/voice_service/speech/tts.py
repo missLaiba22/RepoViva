@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 import httpx
+from repoviva_common.http import get_async_client
 
 from voice_service.config import get_settings
 
@@ -36,13 +37,13 @@ class DeepgramSynthesizer:
         *,
         api_key: str,
         voice: str,
+        http: httpx.AsyncClient,
         timeout: float = _TIMEOUT_SECONDS,
-        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._api_key = api_key
         self._voice = voice
         self._timeout = timeout
-        self._transport = transport
+        self._http = http
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
         """Yield PCM16 24 kHz mono audio for `text`, chunk by chunk.
@@ -57,12 +58,14 @@ class DeepgramSynthesizer:
         }
         headers = {"Authorization": f"Token {self._api_key}"}
 
-        async with (
-            httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client,
-            client.stream(
-                "POST", _SPEAK_URL, params=params, headers=headers, json={"text": text}
-            ) as resp,
-        ):
+        async with self._http.stream(
+            "POST",
+            _SPEAK_URL,
+            params=params,
+            headers=headers,
+            json={"text": text},
+            timeout=self._timeout,
+        ) as resp:
             if resp.is_error:
                 # A streamed body isn't read yet; read it for Deepgram's reason.
                 body = (await resp.aread()).decode(errors="replace")[:300]
@@ -74,4 +77,6 @@ class DeepgramSynthesizer:
 
 def get_synthesizer() -> DeepgramSynthesizer:
     settings = get_settings()
-    return DeepgramSynthesizer(api_key=settings.deepgram_api_key, voice=settings.tts_voice)
+    return DeepgramSynthesizer(
+        api_key=settings.deepgram_api_key, voice=settings.tts_voice, http=get_async_client()
+    )

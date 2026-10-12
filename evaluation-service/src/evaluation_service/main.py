@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from repoviva_common.http import close_async_client, open_async_client
 
 from evaluation_service.db import apply_schema, close_pool, init_pool
 from evaluation_service.generation import resume_generating
@@ -18,6 +19,7 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    open_async_client()
     await apply_schema()
     # Startup resume (decision 049): reports left `generating` by a crash
     # or reload. In the background, so the service answers while it runs.
@@ -29,6 +31,7 @@ async def lifespan(app: FastAPI):
         resume.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await resume
+        await close_async_client()
         await close_pool()
 
 

@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from repoviva_common.http import close_async_client, open_async_client
 
 from voice_service.db import apply_schema, close_pool, init_pool
 from voice_service.internal.router import router as internal_router
@@ -16,10 +17,12 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    open_async_client()
     await apply_schema()
     try:
         yield
     finally:
+        await close_async_client()
         await close_pool()
 
 

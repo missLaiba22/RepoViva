@@ -27,7 +27,7 @@ Source of truth: `docs/architecture.md` (current design) and `docs/decisions.md`
 - Jobs are plain functions that take only an id and load everything else from the DB (e.g. `evaluation_service/generation.py:run_generation`), so they can move to a queue unchanged.
 
 ## Resilience
-- Make outbound HTTP calls only through the service's single `httpx.AsyncClient`, created at startup from the shared factory (which sets the timeout). No ad-hoc clients.
+- Make outbound HTTP calls only through the service's one client from `repoviva_common.http`, opened in the lifespan (decision 055): `AsyncClient` in async services, `Client` in Core API (sync routes). Inject it (`http=`); no ad-hoc clients. Per-call timeouts go on the request.
 - Retry only idempotent calls, with backoff.
 - Jobs are idempotent: check the stored status first so a rerun does nothing. Job state lives in the DB, never in memory.
 - A failing dependency returns a clear error (<TODO: status + body, e.g. 503 {"error", "retryable": true}>), never an unhandled exception.

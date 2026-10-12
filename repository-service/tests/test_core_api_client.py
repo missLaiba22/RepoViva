@@ -36,7 +36,7 @@ async def test_emit_event_posts_signed_request_to_correct_url() -> None:
     client = CoreApiClient(
         base_url="http://core-api.test",
         secret=_SECRET,
-        transport=httpx.MockTransport(handler),
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
 
     await client.emit_event(
@@ -82,7 +82,7 @@ async def test_emit_event_swallows_http_errors_silently() -> None:
     client = CoreApiClient(
         base_url="http://core-api.test",
         secret=_SECRET,
-        transport=httpx.MockTransport(handler),
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
 
     # Must not raise.
@@ -97,7 +97,7 @@ async def test_emit_event_swallows_network_errors_silently() -> None:
     client = CoreApiClient(
         base_url="http://core-api.test",
         secret=_SECRET,
-        transport=httpx.MockTransport(handler),
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
 
     # Must not raise.
