@@ -435,6 +435,55 @@ Recovery: if the trigger was lost, the first read gets a 404 from Evaluation, so
 - Ingestion status *is* observable end-to-end (decision 029, superseding decision 028): Repository Service emits HMAC-signed `ingestion.started`/`ingestion.completed`/`ingestion.failed` callbacks to Core API as the real pipeline runs, and Core API applies a loose state machine and exposes the current state via `GET /v1/repositories/{id}`. Callback delivery is not retried and events are not deduplicated — a callback dropped by network failure leaves the row in whatever state it was last set to, visible to the user as a stuck `queued`/`in_progress` until a later event (if any) corrects it. See decision 029's tradeoffs and revisit triggers.
 - Core API's Alembic autogenerate manages only tables with a Core API model (`include_object` hook, decision 037); other services' tables in the shared database are invisible to it.
 
+## Decided, not yet implemented
+
+Everything above describes the system as it runs today. The changes below
+are decided but not built. When each one ships, move it into the sections
+above and delete it here.
+
+**Pre-generated question plan (decision 052, supersedes 034).**
+- `POST /v1/interviews` makes Core API trigger planning on Voice Service:
+  `POST /internal/v1/interviews/{id}/plan` (HMAC-signed) → 202.
+- Voice Service gets the repository's areas (directories with chunk counts)
+  from a new Repository Service endpoint,
+  `GET /internal/v1/repositories/{id}/areas`. It retrieves 2 chunks per area,
+  for at most `MAX_QUESTIONS` areas, using `filename_prefix`, and writes the
+  whole ordered plan in one LLM call.
+- `plan_status` (`generating` / `ready` / `failed`) lives only in Voice
+  Service. Core API proxies it to the setup page, which shows "Preparing your
+  interview…" and enables Start when the plan is `ready`. On a transient
+  failure, planning is retried once automatically, then a "Try again" button
+  is shown. Decision 036's interview states are unchanged.
+- During the interview there is no retrieval and no question generation for
+  planned questions. After each answer a decision prompt returns `next` or
+  one follow-up (cap: one per planned question), with a stored `reason`.
+- The interview-session data flow's steps 4 and 6 change accordingly, and
+  Voice Service no longer calls Repository Service during the interview.
+
+**Interview sessions in MongoDB (decision 053, supersedes 040).**
+- Voice Service stores one document per interview in a MongoDB collection,
+  `interview_sessions`: the plan, with each planned question's exchanges
+  (planned question and follow-up) nested under it. The `turns` table and
+  Voice Service's Postgres pool are removed.
+- `GET /internal/v1/interviews/{id}/turns` keeps its response shape, so
+  Evaluation Service doesn't change.
+- Local development adds a MongoDB container to `docker-compose.yml`.
+  Production uses MongoDB Atlas, chosen at deployment.
+- After this, Postgres is shared by Core API, Repository Service and
+  Evaluation Service only (decision 021, as amended).
+
+**Request IDs across services (decision 056).**
+- `repoviva_common/request_id.py` adds a middleware to every service: each
+  HTTP request and WebSocket connection gets an `X-Request-ID` (read from
+  the caller or generated), held in a context variable and returned in the
+  response.
+- The shared HTTP client forwards the ID on every outbound call.
+- One `configure_logging()` puts `[request_id]` in every log line and
+  replaces each service's own logging setup; Core API gets logging for the
+  first time.
+- One Voice WebSocket connection is one interview, so a single ID follows
+  an interview through all four services.
+
 ## Future Evolution
 
 Open decisions that will shape architecture:

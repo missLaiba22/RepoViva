@@ -244,6 +244,8 @@ Python 3.11 introduced meaningful performance improvements over 3.10 and is the 
 
 ## 016 — PostgreSQL with pgvector for both relational data and retrieval index
 
+*Amended by decision 053: interview turns move to MongoDB (Voice Service). Everything else listed here stays in Postgres.*
+
 **Decision:**
 A single Postgres database stores all relational data (users, repositories, interviews, turns, reports, encrypted OAuth tokens) and the vector representations used for code retrieval, via the `pgvector` extension.
 
@@ -328,6 +330,8 @@ An interview turn's cross-service latency proves impossible to bring under the 4
 ---
 
 ## 021 — Shared PostgreSQL database across all 4 services
+
+*Amended by decision 053: Voice Service moves to its own MongoDB database. Core API, Repository Service and Evaluation Service still share Postgres.*
 
 **Decision:**
 All 4 services share a single PostgreSQL database. Each service owns its own tables — no service directly reads or writes another service's tables. Cross-service data access goes through HTTP APIs, not through the database.
@@ -1070,6 +1074,8 @@ clear error is cheaper and more honest than making every query approximate.
 
 ## 034 — Interview questions are generated at runtime by Voice Service
 
+*Superseded by decision 052 (pre-generated question plan).*
+
 **Decision:**
 Voice Service generates every interview question at runtime, during the
 live session. The opening question is generated at session start
@@ -1498,6 +1504,8 @@ code 1008.
 
 ## 040 — `turns` table, owned by Voice Service
 
+*Superseded by decision 053 (interview sessions in MongoDB).*
+
 **Decision:**
 Voice Service owns a `turns` table (decision 010's single-Turn shape). Its
 DDL lives in `voice-service/sql/schema.sql` and is applied idempotently
@@ -1548,6 +1556,8 @@ A turn is inserted as `asked` when its question is sent, and updated to
 
 ## 041 — How an interview ends
 
+*Amended by decision 052: "question budget reached" becomes "plan used up", and the number of turns varies with follow-ups.*
+
 **Decision:**
 An interview ends in one of three ways:
 1. **Question budget reached.** After the answer to question N
@@ -1585,6 +1595,8 @@ The end event goes to Core API's `POST /internal/v1/interviews/{id}/events`
 ---
 
 ## 042 — Retrieval queries for opening and follow-up questions
+
+*Amended by decision 052: replaced by per-area retrieval at planning time. No retrieval runs during the interview.*
 
 **Decision:**
 - **Opening question:** retrieve with a fixed seed query: "application
@@ -2231,6 +2243,320 @@ read.*
 
 ---
 
+## 052 — Pre-generated question plan; follow-ups chosen by a decision prompt
+
+*Supersedes decision 034. Amends decisions 041 and 042.*
+
+*Status: decided 2026-10-12, not yet implemented.*
+
+**Decision:**
+Questions are no longer generated one at a time during the interview.
+Voice Service writes an ordered **question plan** when the interview is
+created, and the live session plays the plan. After each answer, a short
+**decision prompt** chooses between moving on and asking one follow-up.
+
+*Planning (when the interview is created):*
+1. Core API creates the interview (`POST /v1/interviews`), then triggers
+   planning: `POST /internal/v1/interviews/{id}/plan` on Voice Service
+   (HMAC-signed, decision 027) → `202 Accepted`. Same trigger shape as
+   reports (decision 049).
+2. Voice Service asks Repository Service for the repository's **areas**:
+   a new endpoint, `GET /internal/v1/repositories/{id}/areas`, returns
+   directories with their chunk counts. Areas come only from the
+   directory structure:
+   - Start at the top-level directories.
+   - If there is only one (for example everything under `src/`), go one
+     level deeper, and repeat until there are at least two.
+   - If the code sits in the root with no directories, each top-level
+     file is an area.
+   - Keep the `MAX_QUESTIONS` largest areas by chunk count.
+3. For each area, Voice Service retrieves **2 chunks**
+   (`filename_prefix` = the area, a fixed query asking for the area's
+   core logic). That is at most 12 chunks for 6 areas.
+4. One LLM call writes the whole plan: `MAX_QUESTIONS` questions,
+   ordered from architecture down to details, one area per question
+   where possible. Each planned question stores its `seq`, `area`,
+   `topic`, `text` and the `chunk_ids` it was written from.
+5. The plan is stored in the interview's session document (decision 053).
+   `plan_status` moves `generating` → `ready`, or → `failed` with an
+   `error_message`.
+
+`plan_status` lives only in Voice Service. Decision 036's interview
+states don't change: the interview stays `created` while its plan is
+prepared. Core API reads the plan status from Voice Service when the
+setup page asks, and stores none of it. Voice Service refuses to start a
+session (before consuming the token) while the plan isn't `ready`.
+
+*Plan status and failure:*
+- The setup page shows "Preparing your interview…" and polls the status
+  through Core API, which proxies it from Voice Service (as reports do,
+  decision 049). Start is enabled when the plan is `ready`.
+- A transient failure (timeout, HTTP 429, unparseable output) is retried
+  once automatically. If that also fails, the setup page offers
+  **Try again**, which re-triggers planning.
+- A permanent failure (no areas, or no chunks for any area) shows a clear
+  message and no retry button, because retrying cannot help.
+
+*During the interview:*
+1. Play planned question `i`. The opening question is planned too, so
+   the first turn no longer waits on retrieval or an LLM call.
+2. Transcribe the answer (decision 043).
+3. If question `i` already had its follow-up (cap: **one per planned
+   question**), move to `i + 1` without an LLM call.
+4. Otherwise, call the **decision prompt** with: question `i`, its
+   stored chunks, the answers on this topic so far, and the next planned
+   question. It returns JSON:
+   `{ "decision": "next" | "follow_up", "reason": "...", "follow_up": "..." }`
+5. `next` → play question `i + 1`. `follow_up` → speak it (TTS, decision
+   044), take the answer, and go back to step 3.
+6. The interview ends when the plan is used up, or as decision 041
+   describes for `session.end` and failures.
+
+The decision prompt lists the criteria for a follow-up (the answer
+doesn't address the question, stays generic about their project,
+contradicts the code, or is "I don't know") and includes one example of
+each outcome. Every exchange stores the `decision` and its `reason`.
+
+No retrieval runs during the interview. A follow-up uses its planned
+question's stored chunks, and records those chunk ids as its own, so
+Evaluation's grounding still works (decisions 049, 050).
+
+**Why:**
+- **Coverage.** Decision 034's revisit trigger 2 (questions concentrating
+  on a narrow set of files) is the main problem: retrieval chained from
+  each answer drifts. Choosing areas up front from the repository's own
+  structure spreads the questions on purpose.
+- **Opening-turn latency.** Decision 034 accepted that the opening turn
+  is the slowest. With the plan ready before the user joins, it costs
+  only TTS.
+- **Retrieval leaves the turn path.** Every later turn drops one Voyage
+  embedding call and one vector search (decisions 032, 033).
+- **Follow-ups stay.** Requirements "System can ask relevant follow-up
+  questions" and "Interview maintains conversation context" are kept.
+  The decision is now explicit and logged with a reason, instead of
+  hidden inside one generation prompt.
+- **Areas from structure, not a fixed list.** Fixed areas ("API",
+  "auth") don't exist in every repository. Directories adapt to each
+  one and need no LLM call. Going one level deeper handles the
+  everything-in-`src/` layout without falling back to generic queries.
+- **Area listing belongs to Repository Service.** It owns `code_chunks`
+  (decision 031). Voice Service asks for areas instead of reading the
+  table (decision 021).
+- **2 chunks per area, at most 6 areas.** Sized for Groq's ~8,000 tokens
+  per minute (decision 051), which planning shares with live interviews
+  on the same model. *Assumption, to measure:* `CHUNK_SIZE` is 1,000
+  characters, so a chunk is roughly 250–350 tokens; 12 chunks plus the
+  prompt and output come to about 5,000 tokens.
+- **One follow-up per planned question.** Keeps an interview at 6–12
+  turns, which is close to today's length and the token budget.
+- **`plan_status` stays in Voice Service.** The plan is Voice's data.
+  Mirroring it in Core API would need another event callback, and two
+  copies of a status that can disagree.
+
+**Alternatives considered:**
+- **Keep runtime generation (034).** Rejected: no control over coverage,
+  and the slowest turn is the first one.
+- **Pre-generated questions with no follow-ups.** Simplest, and the
+  fastest turns. Rejected because it drops two requirements. It also
+  removes the hint for "I don't know".
+- **Topic plan, with every question phrased at runtime.** Adapts wording
+  to the conversation, but keeps an LLM call on every planned turn and
+  doesn't speed up the opening.
+- **Plan at ingestion time.** Rejected for the reason in 034: every
+  interview on a repository would get the same questions (decision 002).
+- **Fall back to runtime generation when planning fails.** Rejected:
+  keeps two question-generation paths alive.
+- **Rules in code for follow-ups** (short answer, "I don't know").
+  Deferred, not rejected. Cheap and predictable, but blind to a long,
+  confident, wrong answer.
+
+**Tradeoff:**
+- Planned questions can't refer to what the candidate said. Transitions
+  can only mention the previous *topic*.
+- A follow-up can drift into the next planned question's scenario.
+  Mitigation: the decision prompt sees the next planned question and is
+  told not to cover it. Not guaranteed.
+- One planning call per created interview, even if it is never started.
+- The decision prompt is unmeasured. It may follow up too often or let
+  weak answers through. Only the cap is enforced in code.
+- A new state on the setup page ("preparing", "failed"), and a new
+  internal endpoint.
+- **Rate limits.** The planning call is the largest prompt on the
+  question model. If an interview is live at the same moment, the two
+  compete for the same per-minute tokens. Log the planning call's token
+  count from the first run.
+- 2 chunks may be thin for a large area. Directory size is a rough proxy
+  for importance: a big `tests/` or `migrations/` directory can win a
+  slot over core code.
+- One follow-up may be too few for a weak answer that needs two probes.
+
+**Consequences:**
+- Decision 041: "question budget reached" now means "plan used up". The
+  number of turns varies: `MAX_QUESTIONS` plus the follow-ups asked.
+- Decision 042: the seed query and the per-turn retrieval query are
+  replaced by per-area retrieval at planning time. `exclude_chunk_ids` is
+  no longer needed during the interview.
+- Voice Service no longer needs the Repository client on the turn path,
+  only during planning.
+- Repository Service gains one internal endpoint (areas). Core API gains
+  one trigger call and one status proxy.
+- The system prompt splits into a planning prompt and a decision prompt.
+
+**Revisit when:**
+- Follow-ups feel wrong or excessive in real interviews, or enough
+  `reason`s are stored to label: add an eval set for the decision prompt
+  (same pattern as `grader_sanity.py`), then code rules if needed.
+- Planning fails on rate limits, or its measured token count is far
+  from the ~5,000 estimate (then resize chunks per area).
+- Plans pick test, migration or generated-code directories over core
+  code (then exclude them, or weight areas differently).
+- Weak answers routinely need a second follow-up.
+- Planned questions still concentrate on a few files (top-level
+  directories too coarse, for example a repository with everything in
+  `src/`).
+- Measured latency (against the baseline recorded before this change)
+  doesn't improve.
+
+---
+
+## 053 — MongoDB for interview sessions; Postgres for everything else
+
+*Supersedes decision 040. Amends decisions 016 and 021.*
+
+*Status: decided 2026-10-12, not yet implemented.*
+
+**Decision:**
+Voice Service stores each interview as **one document** in MongoDB: the
+question plan (decision 052), every question asked, the answers, the
+follow-ups and their decisions. The `turns` table is dropped. Its data was
+development data only, so nothing is migrated.
+
+Everything else stays in PostgreSQL: users, repositories and interviews
+(Core API), `code_chunks` with pgvector (Repository Service), and reports
+(Evaluation Service).
+
+Collection `interview_sessions`, one document per interview:
+
+    {
+      _id,
+      interview_id:   int, unique index     -- from Core API; no FK (as in 040)
+      repository_id:  int
+      plan_status:    "generating" | "ready" | "failed"
+      error_message:  string | null
+      plan_attempts:  int                   -- for the one automatic retry (052)
+      questions: [                          -- the plan, in order
+        {
+          seq, area, topic, text,
+          chunk_ids: [int],
+          exchanges: [                      -- what was actually said
+            {
+              turn_seq:  int,               -- spoken order across the interview
+              kind:      "planned" | "follow_up",
+              question:  string,
+              answer:    string | null,
+              status:    "asked" | "answered",
+              decision:  "next" | "follow_up" | null,
+              reason:    string | null,
+              timings:   { stage: ms },
+              asked_at, answered_at
+            }
+          ]
+        }
+      ],
+      created_at, updated_at
+    }
+
+Follow-ups are nested under the planned question they belong to. An
+exchange is written as `asked` before its audio plays and updated to
+`answered` when the answer arrives, as `turns` did (decision 040), so an
+interrupted interview still records what was asked (decision 008).
+
+Each write is a single-document update (for example, pushing an exchange
+into `questions.<i>.exchanges`). The live session is the only writer of
+its document.
+
+**The `/turns` contract doesn't change.**
+`GET /internal/v1/interviews/{id}/turns` (decision 049) flattens the
+exchanges into the same list Evaluation Service reads today: `seq`
+(= `turn_seq`), `question_text`, `answer_text`, `status`,
+`retrieved_chunk_ids` (the planned question's `chunk_ids`). Evaluation
+Service needs no change. A `kind` field may be added; extra fields don't
+break the existing client.
+
+Local development runs MongoDB as a container in `docker-compose.yml`.
+Production uses MongoDB Atlas, chosen at deployment time.
+
+**Why:**
+- **Learning goal, stated honestly.** The project mentor asked for
+  experience with polyglot persistence: a document store next to a
+  relational one, as many real systems run. Postgres could store this
+  data too (see Alternatives). This decision is made for the experience,
+  and the interview session is the part of the system where a document
+  store fits best.
+- **The data is a tree that is read and written as a whole.** A plan
+  with questions, each with its exchanges, is one-to-many nested data,
+  always loaded by `interview_id`. That is the case document models suit
+  (DDIA, Chapter 2). In Postgres it would be several tables or JSONB
+  columns.
+- **Single-document writes are atomic.** Appending an exchange and
+  recording its decision happen together, without a transaction.
+- **The service boundary contains the change.** Evaluation reads turns
+  over HTTP, never from the table (decisions 021, 049), so only Voice
+  Service changes.
+- **Voice Service drops Postgres.** `turns` was its only table, so Voice
+  Service ends up with one datastore, not two.
+
+**Alternatives considered:**
+- **Postgres JSONB** (a `question_plans` table, or JSONB columns on a
+  session row). Technically enough: one less database to run, and
+  transactions alongside other tables. Not chosen because it doesn't
+  meet the learning goal.
+- **Keep `turns` in Postgres and put only the plan in MongoDB.** Rejected:
+  one interview split across two stores, with no atomic write covering
+  both.
+- **Move reports to MongoDB as well.** They are also document-shaped.
+  Deferred: one migration at a time, and Evaluation works as it is.
+
+**Tradeoff:**
+- A second database to run locally, deploy, secure and back up. Atlas
+  adds a separate account, credentials and network setup next to AWS.
+- No schema in the database: shape is enforced in code (Pydantic models
+  on read and write). An optional `$jsonSchema` validator is deferred.
+- No transactions across MongoDB and Postgres. None are needed today:
+  the stores belong to different services and already communicate by
+  events.
+- Deleting an interview still doesn't delete its session (as in 040).
+  That belongs to the cross-service deletion flow in `architecture.md`.
+- Coverage queries across interviews ("distinct files per interview")
+  become aggregation pipelines instead of SQL.
+
+**Consequences:**
+- `voice-service/sql/schema.sql`, `db.py`'s Postgres pool and `TurnStore`
+  are replaced by a Mongo-backed session store.
+- Decision 021 now reads: Postgres is shared by Core API, Repository
+  Service and Evaluation Service. Voice Service owns its own MongoDB
+  database.
+- `docker-compose.yml` gains a MongoDB service, and `.env.example` a
+  `MONGODB_URI`.
+- Voice Service tests need a MongoDB to run against.
+
+**Needs verification before implementation:**
+- The Python driver. My understanding is that MongoDB now recommends
+  PyMongo's built-in async API and has deprecated Motor. Check the
+  current MongoDB Python docs before choosing.
+- The Atlas free tier (believed to be "M0", 512 MB) and whether it can
+  run in an AWS region. Check at deployment time.
+
+**Revisit when:**
+- Queries across many sessions (analytics, coverage dashboards) become
+  frequent and painful as aggregation pipelines.
+- A need appears for a transaction covering session data and Postgres
+  data.
+- Running two databases costs more than the learning is worth (for
+  example, Atlas doesn't fit the deployment budget).
+
+---
+
 ## 054 — Shared `repoviva-common` package for internal-call infrastructure
 
 *Amends decision 027 (replaces its "write it twice, deliberately" paragraph).*
@@ -2325,3 +2651,59 @@ this same client. So this does not get reworked when queues arrive.
 **Revisit when:**
 Core API becomes async (switch it to `AsyncClient`), or a dependency needs
 its own limits or retry policy (give it its own client).
+
+---
+
+## 056 — Request IDs across services
+
+*Status: decided 2026-10-12, not yet implemented.*
+
+**Decision:**
+Every HTTP request and WebSocket connection carries a request ID that
+appears in every log line and is forwarded on every outbound call. One
+module in the shared package (decision 054), `repoviva_common/request_id.py`:
+
+- **Middleware:** on each HTTP request and WebSocket connection, reads
+  `X-Request-ID` if present and valid (≤ 64 characters, letters, digits
+  and `-`), otherwise generates one. It stores the ID in a context
+  variable and returns it in the response header.
+- **Outbound hook:** the shared HTTP client (decision 055) adds the
+  current ID to every outbound request, so client code doesn't change.
+  External APIs ignore it. HMAC signs only the body, so it's unaffected.
+- **`configure_logging()`:** one log format for all services, with the
+  ID: `%(asctime)s %(levelname)s %(name)s [%(request_id)s]: %(message)s`,
+  and `-` outside a request. It replaces the three copied `basicConfig`
+  blocks and gives Core API logging, which it has none of today.
+- **`new_request_id()`:** for work with no incoming request, e.g.
+  Evaluation's startup resume gives each resumed report its own ID.
+
+Voice's interview is one WebSocket connection, so one ID covers one
+interview. `BackgroundTasks` and `asyncio.create_task` copy the caller's
+context, so background work keeps the ID of the request that started it.
+
+**Why:**
+One interview crosses all four services: Voice → Core API (token,
+events) → Evaluation → Voice and Repository. Today their logs can't be
+joined, and Core API's warnings print without time, level or logger
+because it never configures logging. With one ID, following an interview
+is one search.
+
+**Options considered:**
+- OpenTelemetry tracing. Richer (spans, timings), but it needs a
+  collector and a backend to view traces. Too much for local
+  development now.
+- Log `interview_id` instead. It doesn't exist for every request
+  (sign-in, ingestion), and it isn't passed between services.
+
+**Not in scope:**
+JSON logs (at the AWS step, for CloudWatch), a browser-sent ID, and
+uvicorn's access log, which has its own formatter.
+
+**Tradeoff:**
+The ID lives in a context variable. Work started on a raw thread
+(outside Starlette or asyncio) loses it. Nothing does that today.
+
+**Revisit when:**
+Distributed tracing (OpenTelemetry) is added: trace and span IDs replace
+request IDs, and OTel's middleware and httpx instrumentation replace
+these.
