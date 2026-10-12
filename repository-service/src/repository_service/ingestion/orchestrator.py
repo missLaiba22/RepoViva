@@ -15,10 +15,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from repository_service.clients.core_api import get_core_api_client
 from repository_service.db import get_db_pool
 from repository_service.indexing import RepositoryTooLargeError, run_indexing
 from repository_service.ingestion.fetcher import FetchError, fetch_repository
-from repository_service.internal.core_api_client import get_core_api_client
 
 logger = logging.getLogger(__name__)
 

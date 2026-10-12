@@ -15,10 +15,8 @@ import hmac
 import json
 
 import httpx
-import pytest
 
-from repository_service.internal.core_api_client import CoreApiClient
-
+from repository_service.clients.core_api import CoreApiClient
 
 _SECRET = "test-secret-32-chars-or-so-long"
 

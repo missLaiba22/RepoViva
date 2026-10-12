@@ -1,4 +1,4 @@
-# repository-service/src/repository_service/internal/core_api_client.py
+# repository-service/src/repository_service/clients/core_api.py
 """Outbound HTTP client: fires ingestion-status callbacks at Core API.
 
 Every request is HMAC-signed with the shared internal secret (decision 027).
