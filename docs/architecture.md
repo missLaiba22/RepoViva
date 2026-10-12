@@ -451,10 +451,12 @@ above and delete it here.
   whole ordered plan in one LLM call. Questions are scenario-based and never
   name code (decision 048's rules, now in the planning prompt).
 - `plan_status` (`generating` / `ready` / `failed`) lives only in Voice
-  Service. Core API proxies it to the setup page, which shows "Preparing your
-  interview…" and enables Start when the plan is `ready`. On a transient
-  failure, planning is retried once automatically, then a "Try again" button
-  is shown. Decision 036's interview states are unchanged.
+  Service. The setup page is unchanged: Start creates the interview and
+  triggers planning. The live page shows "Preparing your interview…", polls
+  the status through Core API, and opens the WebSocket when the plan is
+  `ready`. On a transient failure, planning is retried once automatically,
+  then a "Try again" button is shown. Decision 036's interview states are
+  unchanged.
 - During the interview there is no retrieval and no LLM call: Voice Service
   asks each planned question in order, stores the answer, and moves on.
   There are no follow-up questions.

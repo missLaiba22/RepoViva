@@ -2292,18 +2292,27 @@ There are no follow-up questions.
 `plan_status` lives only in Voice Service. Decision 036's interview
 states don't change: the interview stays `created` while its plan is
 prepared. Core API reads the plan status from Voice Service when the
-setup page asks, and stores none of it. Voice Service refuses to start a
+live page asks, and stores none of it. Voice Service refuses to start a
 session (before consuming the token) while the plan isn't `ready`.
 
+*Where the user waits (amended 2026-10-13):*
+The setup page doesn't change: **Start interview** creates the interview
+and its session token, as today, and planning is triggered at that
+moment. The live page then shows "Preparing your interview…" and polls
+the plan status through Core API, which proxies it from Voice Service
+(as reports do, decision 049). When the plan is `ready`, the live page
+opens the WebSocket and sends `session.start`.
+
 *Plan status and failure:*
-- The setup page shows "Preparing your interview…" and polls the status
-  through Core API, which proxies it from Voice Service (as reports do,
-  decision 049). Start is enabled when the plan is `ready`.
 - A transient failure (timeout, HTTP 429, unparseable output) is retried
-  once automatically. If that also fails, the setup page offers
+  once automatically. If that also fails, the live page offers
   **Try again**, which re-triggers planning.
 - A permanent failure (no areas, or no chunks for any area) shows a clear
   message and no retry button, because retrying cannot help.
+- The session token still expires 5 minutes after creation
+  (decision 035). Planning normally takes seconds. If the token expires
+  while the user waits or retries, the live page sends them back to the
+  setup page to start a new interview, as an expired token does today.
 
 *During the interview:*
 1. Play planned question `i` (TTS, decision 044).
@@ -2368,7 +2377,10 @@ still works (decisions 049, 050).
   to the next scenario.
 - A weak or off-topic answer isn't probed. It only shows up in the report.
 - One planning call per created interview, even if it is never started.
-- A new state on the setup page ("preparing", "failed"), and a new
+- After clicking Start, the user waits for planning (expected 5–15 s)
+  before the first question. The wait moves from the first turn to
+  before the interview.
+- A new state on the live page ("preparing", "failed"), and a new
   internal endpoint.
 - **Rate limits.** The planning call is the largest prompt on the
   question model. If an interview is live at the same moment, the two
@@ -2516,6 +2528,13 @@ Production uses MongoDB Atlas, chosen at deployment time.
 - `docker-compose.yml` gains a MongoDB service, and `.env.example` a
   `MONGODB_URI`.
 - Voice Service tests need a MongoDB to run against.
+- **WebSocket protocol change (decision 045).** `question.text`,
+  `question.audio_end`, `transcript.final` and `turn.complete` carry
+  `turn_id`, the `turns` row id, which no longer exists. They carry
+  `seq` instead. `question.text` already has `seq`, so it drops
+  `turn_id`; the other three replace `turn_id` with `seq`. The frontend's
+  `live/protocol.ts` and `liveReducer.ts` change to match, in the same
+  release as Voice Service.
 
 **Needs verification before implementation:**
 - The Python driver. My understanding is that MongoDB now recommends
