@@ -124,7 +124,6 @@ async def test_search_never_crosses_repositories(pool, two_indexed_repos) -> Non
             query_embedding=_fake_vector("anything"),
             top_k=50,
             filename_prefix=None,
-            exclude_chunk_ids=[],
         )
         assert results
         other = "beta" if marker == "alpha" else "alpha"

@@ -34,7 +34,7 @@ async def measure(conn: asyncpg.Connection, repo: str) -> None:
         "ORDER BY id LIMIT 1",
         repo,
     )
-    args = (query_vec, repo, None, [], 10)
+    args = (query_vec, repo, None, 10)
 
     t0 = time.perf_counter()
     await conn.fetch(_SEARCH_SQL, *args)

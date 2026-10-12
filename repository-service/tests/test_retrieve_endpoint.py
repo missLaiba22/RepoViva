@@ -56,7 +56,6 @@ async def test_retrieve_returns_chunks_and_forwards_args(monkeypatch) -> None:
         query="how does auth work?",
         top_k=5,
         filename_prefix="src/",
-        exclude_chunk_ids=[10, 11],
     )
 
     result = await retrieve_chunks(repository_id=42, body=body)
@@ -68,7 +67,6 @@ async def test_retrieve_returns_chunks_and_forwards_args(monkeypatch) -> None:
     assert search_kwargs["repository_id"] == "42"
     assert search_kwargs["top_k"] == 5
     assert search_kwargs["filename_prefix"] == "src/"
-    assert search_kwargs["exclude_chunk_ids"] == [10, 11]
 
 
 async def test_retrieve_returns_empty_chunks_when_no_matches(monkeypatch) -> None:

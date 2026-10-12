@@ -201,8 +201,7 @@ POST /internal/v1/repositories/{repository_id}/retrieve
 body: {
   query: string,
   top_k?: int = 10,               // 1-50
-  filename_prefix?: string,
-  exclude_chunk_ids?: int[] = []
+  filename_prefix?: string
 }
 → 200 OK: { chunks: [ { id, content, filename, start_line, end_line,
                          language, similarity }, ... ] }

@@ -38,7 +38,6 @@ class RetrieveRequestBody(BaseModel):
     query: str
     top_k: int = Field(default=10, ge=1, le=50)
     filename_prefix: str | None = None
-    exclude_chunk_ids: list[int] = []
 
 
 class ChunksByIdBody(BaseModel):
@@ -116,7 +115,6 @@ async def retrieve_chunks(
         query_embedding=query_embedding,
         top_k=body.top_k,
         filename_prefix=body.filename_prefix,
-        exclude_chunk_ids=body.exclude_chunk_ids,
     )
     return {"chunks": chunks}
 

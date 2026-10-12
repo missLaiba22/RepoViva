@@ -61,7 +61,7 @@ async def run(golden_path: Path, repos: list[str]) -> None:
             for repo in repos:
                 rows = await search_chunks(
                     pool, repository_id=repo, query_embedding=emb,
-                    top_k=k, filename_prefix=None, exclude_chunk_ids=[],
+                    top_k=k, filename_prefix=None,
                 )
                 files = [r["filename"] for r in rows]
                 rel = [any(re.match(p, f) for p in patterns) for f in files]

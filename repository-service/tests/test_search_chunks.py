@@ -81,7 +81,6 @@ async def test_search_only_returns_requested_repository(pool, two_repos) -> None
         query_embedding=_unit(2),
         top_k=10,
         filename_prefix=None,
-        exclude_chunk_ids=[],
     )
 
     assert len(results) == 3
@@ -97,7 +96,6 @@ async def test_search_is_exact_nearest_first(pool, two_repos) -> None:
         query_embedding=_unit(2),
         top_k=1,
         filename_prefix=None,
-        exclude_chunk_ids=[],
     )
 
     assert [r["id"] for r in results] == [2]

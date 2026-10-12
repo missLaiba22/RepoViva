@@ -26,9 +26,8 @@ _SEARCH_SQL = """
     FROM code_chunks
     WHERE repository_id = $2
       AND ($3::text IS NULL OR starts_with(filename, $3))
-      AND NOT (id = ANY($4::bigint[]))
     ORDER BY embedding <=> $1::vector
-    LIMIT $5
+    LIMIT $4
 """
 
 
@@ -43,7 +42,6 @@ async def search_chunks(
     query_embedding: NDArray[np.float32],
     top_k: int,
     filename_prefix: str | None,
-    exclude_chunk_ids: list[int],
 ) -> list[dict]:
     """Top-`top_k` chunks for `repository_id`, nearest first.
 
@@ -56,7 +54,6 @@ async def search_chunks(
         _to_vector_literal(query_embedding),
         repository_id,
         filename_prefix,
-        exclude_chunk_ids,
         top_k,
     )
     return [dict(row) for row in rows]

@@ -15,7 +15,7 @@ RepoViva's Repository Service. Ingests GitHub repositories (clone → chunk → 
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/internal/v1/repositories/{id}/ingest` | `{ github_url }` → 202 |
-| POST | `/internal/v1/repositories/{id}/retrieve` | `{ query, top_k?, filename_prefix?, exclude_chunk_ids? }` → `{ chunks }` |
+| POST | `/internal/v1/repositories/{id}/retrieve` | `{ query, top_k?, filename_prefix? }` → `{ chunks }` |
 | GET | `/health` | Liveness |
 
 Internal endpoints require HMAC headers (decision 027). Retrieval returns an empty list rather than 404 for unknown or not-yet-indexed repositories.
