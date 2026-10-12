@@ -18,8 +18,6 @@ GitHub projects through a realistic, code-aware mock interview.
 - System asks questions based on the user's actual code.
 - User can answer using voice.
 - System can understand the user's answer.
-- System can ask relevant follow-up questions.
-- Interview maintains conversation context.
 
 ### Evaluation
 - System evaluates the user's answers.
@@ -41,7 +39,6 @@ GitHub projects through a realistic, code-aware mock interview.
 - Code-aware retrieval
 - Code-specific interview questions
 - Voice-based interview
-- Follow-up questions
 - Answer evaluation
 - Final report
 

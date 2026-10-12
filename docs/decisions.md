@@ -1556,7 +1556,7 @@ A turn is inserted as `asked` when its question is sent, and updated to
 
 ## 041 — How an interview ends
 
-*Amended by decision 052: "question budget reached" becomes "plan used up", and the number of turns varies with follow-ups.*
+*Amended by decision 052: "question budget reached" becomes "plan used up", and an interview has exactly `MAX_QUESTIONS` turns unless it ends early.*
 
 **Decision:**
 An interview ends in one of three ways:
@@ -1867,6 +1867,8 @@ which sent a WAV.
 ---
 
 ## 048 — Scenario-based questions; code is background, not the subject
+
+*Amended by decision 052: these rules move into the planning prompt. The "I don't know" hint no longer applies, since there are no follow-ups.*
 
 **Decision:**
 The interviewer prompt (`voice-service/src/voice_service/llm/prompts.py`)
@@ -2243,27 +2245,28 @@ read.*
 
 ---
 
-## 052 — Pre-generated question plan; follow-ups chosen by a decision prompt
+## 052 — Pre-generated, scenario-based question plan; no follow-ups
 
-*Supersedes decision 034. Amends decisions 041 and 042.*
+*Supersedes decision 034. Amends decisions 041, 042 and 048.*
 
-*Status: decided 2026-10-12, not yet implemented.*
+*Status: decided 2026-10-12, simplified 2026-10-13, not yet implemented.*
 
 **Decision:**
-Questions are no longer generated one at a time during the interview.
-Voice Service writes an ordered **question plan** when the interview is
-created, and the live session plays the plan. After each answer, a short
-**decision prompt** chooses between moving on and asking one follow-up.
+Questions are no longer generated during the interview. When the
+interview is created, Voice Service writes every question up front as an
+ordered **question plan** that covers the repository's major parts. The
+live session plays the plan in order: ask, take the answer, ask the next.
+There are no follow-up questions.
 
 *Planning (when the interview is created):*
 1. Core API creates the interview (`POST /v1/interviews`), then triggers
    planning: `POST /internal/v1/interviews/{id}/plan` on Voice Service
    (HMAC-signed, decision 027) → `202 Accepted`. Same trigger shape as
    reports (decision 049).
-2. Voice Service asks Repository Service for the repository's **areas**:
-   a new endpoint, `GET /internal/v1/repositories/{id}/areas`, returns
-   directories with their chunk counts. Areas come only from the
-   directory structure:
+2. Voice Service asks Repository Service for the repository's **areas**
+   (its major parts): a new endpoint,
+   `GET /internal/v1/repositories/{id}/areas`, returns directories with
+   their chunk counts. Areas come only from the directory structure:
    - Start at the top-level directories.
    - If there is only one (for example everything under `src/`), go one
      level deeper, and repeat until there are at least two.
@@ -2273,10 +2276,15 @@ created, and the live session plays the plan. After each answer, a short
 3. For each area, Voice Service retrieves **2 chunks**
    (`filename_prefix` = the area, a fixed query asking for the area's
    core logic). That is at most 12 chunks for 6 areas.
-4. One LLM call writes the whole plan: `MAX_QUESTIONS` questions,
-   ordered from architecture down to details, one area per question
-   where possible. Each planned question stores its `seq`, `area`,
-   `topic`, `text` and the `chunk_ids` it was written from.
+4. One LLM call writes the whole plan: `MAX_QUESTIONS` questions, one
+   area per question where possible, ordered from architecture down to
+   details. The planning prompt keeps decision 048's rules: each question
+   is a **scenario** in plain product and system terms, the code is
+   background and never named (no files, functions, classes or
+   variables), one question of at most two sentences and 35 words, and
+   the first question is an easy warm-up. Each planned question stores
+   its `seq`, `area`, `topic`, `text` and the `chunk_ids` it was written
+   from.
 5. The plan is stored in the interview's session document (decision 053).
    `plan_status` moves `generating` → `ready`, or → `failed` with an
    `error_message`.
@@ -2298,43 +2306,29 @@ session (before consuming the token) while the plan isn't `ready`.
   message and no retry button, because retrying cannot help.
 
 *During the interview:*
-1. Play planned question `i`. The opening question is planned too, so
-   the first turn no longer waits on retrieval or an LLM call.
-2. Transcribe the answer (decision 043).
-3. If question `i` already had its follow-up (cap: **one per planned
-   question**), move to `i + 1` without an LLM call.
-4. Otherwise, call the **decision prompt** with: question `i`, its
-   stored chunks, the answers on this topic so far, and the next planned
-   question. It returns JSON:
-   `{ "decision": "next" | "follow_up", "reason": "...", "follow_up": "..." }`
-5. `next` → play question `i + 1`. `follow_up` → speak it (TTS, decision
-   044), take the answer, and go back to step 3.
-6. The interview ends when the plan is used up, or as decision 041
+1. Play planned question `i` (TTS, decision 044).
+2. Transcribe the answer (decision 043) and store it.
+3. Move to question `i + 1`. No LLM call and no retrieval.
+4. The interview ends when the plan is used up, or as decision 041
    describes for `session.end` and failures.
 
-The decision prompt lists the criteria for a follow-up (the answer
-doesn't address the question, stays generic about their project,
-contradicts the code, or is "I don't know") and includes one example of
-each outcome. Every exchange stores the `decision` and its `reason`.
-
-No retrieval runs during the interview. A follow-up uses its planned
-question's stored chunks, and records those chunk ids as its own, so
-Evaluation's grounding still works (decisions 049, 050).
+Each question keeps its stored `chunk_ids`, so Evaluation's grounding
+still works (decisions 049, 050).
 
 **Why:**
+- **Simple.** One LLM call per interview, at planning time. The live
+  session is a loop over a list: no decision prompt, no follow-up cap,
+  no variable number of turns.
 - **Coverage.** Decision 034's revisit trigger 2 (questions concentrating
   on a narrow set of files) is the main problem: retrieval chained from
   each answer drifts. Choosing areas up front from the repository's own
-  structure spreads the questions on purpose.
-- **Opening-turn latency.** Decision 034 accepted that the opening turn
-  is the slowest. With the plan ready before the user joins, it costs
-  only TTS.
-- **Retrieval leaves the turn path.** Every later turn drops one Voyage
+  structure spreads the questions over its major parts on purpose.
+- **Fast turns.** With the plan ready before the user joins, every turn,
+  including the opening one, costs only STT and TTS.
+- **Retrieval leaves the turn path.** Every turn drops one Voyage
   embedding call and one vector search (decisions 032, 033).
-- **Follow-ups stay.** Requirements "System can ask relevant follow-up
-  questions" and "Interview maintains conversation context" are kept.
-  The decision is now explicit and logged with a reason, instead of
-  hidden inside one generation prompt.
+- **Scenario style kept.** Decision 048's rules move from the runtime
+  prompt into the planning prompt.
 - **Areas from structure, not a fixed list.** Fixed areas ("API",
   "auth") don't exist in every repository. Directories adapt to each
   one and need no LLM call. Going one level deeper handles the
@@ -2347,8 +2341,6 @@ Evaluation's grounding still works (decisions 049, 050).
   on the same model. *Assumption, to measure:* `CHUNK_SIZE` is 1,000
   characters, so a chunk is roughly 250–350 tokens; 12 chunks plus the
   prompt and output come to about 5,000 tokens.
-- **One follow-up per planned question.** Keeps an interview at 6–12
-  turns, which is close to today's length and the token budget.
 - **`plan_status` stays in Voice Service.** The plan is Voice's data.
   Mirroring it in Core API would need another event callback, and two
   copies of a status that can disagree.
@@ -2356,29 +2348,26 @@ Evaluation's grounding still works (decisions 049, 050).
 **Alternatives considered:**
 - **Keep runtime generation (034).** Rejected: no control over coverage,
   and the slowest turn is the first one.
-- **Pre-generated questions with no follow-ups.** Simplest, and the
-  fastest turns. Rejected because it drops two requirements. It also
-  removes the hint for "I don't know".
+- **Plan plus follow-ups chosen by a decision prompt** (this decision's
+  first version). Rejected as too complex for what it adds: a second
+  prompt, a cap, decisions and reasons to store, and follow-ups that can
+  drift into the next planned scenario.
 - **Topic plan, with every question phrased at runtime.** Adapts wording
-  to the conversation, but keeps an LLM call on every planned turn and
-  doesn't speed up the opening.
+  to the conversation, but keeps an LLM call on every turn and doesn't
+  speed up the opening.
 - **Plan at ingestion time.** Rejected for the reason in 034: every
   interview on a repository would get the same questions (decision 002).
 - **Fall back to runtime generation when planning fails.** Rejected:
   keeps two question-generation paths alive.
-- **Rules in code for follow-ups** (short answer, "I don't know").
-  Deferred, not rejected. Cheap and predictable, but blind to a long,
-  confident, wrong answer.
 
 **Tradeoff:**
-- Planned questions can't refer to what the candidate said. Transitions
-  can only mention the previous *topic*.
-- A follow-up can drift into the next planned question's scenario.
-  Mitigation: the decision prompt sees the next planned question and is
-  told not to cover it. Not guaranteed.
+- **Two requirements are dropped:** "System can ask relevant follow-up
+  questions" and "Interview maintains conversation context". Questions
+  can't refer to what the candidate said.
+- **"I don't know" gets no hint** (decision 048). The interview moves on
+  to the next scenario.
+- A weak or off-topic answer isn't probed. It only shows up in the report.
 - One planning call per created interview, even if it is never started.
-- The decision prompt is unmeasured. It may follow up too often or let
-  weak answers through. Only the cap is enforced in code.
 - A new state on the setup page ("preparing", "failed"), and a new
   internal endpoint.
 - **Rate limits.** The planning call is the largest prompt on the
@@ -2388,29 +2377,28 @@ Evaluation's grounding still works (decisions 049, 050).
 - 2 chunks may be thin for a large area. Directory size is a rough proxy
   for importance: a big `tests/` or `migrations/` directory can win a
   slot over core code.
-- One follow-up may be too few for a weak answer that needs two probes.
 
 **Consequences:**
-- Decision 041: "question budget reached" now means "plan used up". The
-  number of turns varies: `MAX_QUESTIONS` plus the follow-ups asked.
+- Decision 041: "question budget reached" now means "plan used up". An
+  interview has exactly `MAX_QUESTIONS` turns unless it ends early.
 - Decision 042: the seed query and the per-turn retrieval query are
   replaced by per-area retrieval at planning time. `exclude_chunk_ids` is
   no longer needed during the interview.
+- Decision 048: its rules now live in the planning prompt. Its "I don't
+  know" hint no longer applies.
 - Voice Service no longer needs the Repository client on the turn path,
   only during planning.
 - Repository Service gains one internal endpoint (areas). Core API gains
   one trigger call and one status proxy.
-- The system prompt splits into a planning prompt and a decision prompt.
+- The runtime interviewer prompt is replaced by a planning prompt.
 
 **Revisit when:**
-- Follow-ups feel wrong or excessive in real interviews, or enough
-  `reason`s are stored to label: add an eval set for the decision prompt
-  (same pattern as `grader_sanity.py`), then code rules if needed.
+- Interviews feel scripted, or candidates want a question explained or
+  probed further: reconsider follow-ups (see Alternatives).
 - Planning fails on rate limits, or its measured token count is far
   from the ~5,000 estimate (then resize chunks per area).
 - Plans pick test, migration or generated-code directories over core
   code (then exclude them, or weight areas differently).
-- Weak answers routinely need a second follow-up.
 - Planned questions still concentrate on a few files (top-level
   directories too coarse, for example a repository with everything in
   `src/`).
@@ -2427,8 +2415,8 @@ Evaluation's grounding still works (decisions 049, 050).
 
 **Decision:**
 Voice Service stores each interview as **one document** in MongoDB: the
-question plan (decision 052), every question asked, the answers, the
-follow-ups and their decisions. The `turns` table is dropped. Its data was
+question plan (decision 052), with each question's answer and timings
+stored on it. The `turns` table is dropped. Its data was
 development data only, so nothing is migrated.
 
 Everything else stays in PostgreSQL: users, repositories and interviews
@@ -2448,40 +2436,29 @@ Collection `interview_sessions`, one document per interview:
         {
           seq, area, topic, text,
           chunk_ids: [int],
-          exchanges: [                      -- what was actually said
-            {
-              turn_seq:  int,               -- spoken order across the interview
-              kind:      "planned" | "follow_up",
-              question:  string,
-              answer:    string | null,
-              status:    "asked" | "answered",
-              decision:  "next" | "follow_up" | null,
-              reason:    string | null,
-              timings:   { stage: ms },
-              asked_at, answered_at
-            }
-          ]
+          status:    "planned" | "asked" | "answered",
+          answer:    string | null,
+          timings:   { stage: ms },
+          asked_at, answered_at
         }
       ],
       created_at, updated_at
     }
 
-Follow-ups are nested under the planned question they belong to. An
-exchange is written as `asked` before its audio plays and updated to
+A question moves from `planned` to `asked` before its audio plays, and to
 `answered` when the answer arrives, as `turns` did (decision 040), so an
 interrupted interview still records what was asked (decision 008).
 
-Each write is a single-document update (for example, pushing an exchange
-into `questions.<i>.exchanges`). The live session is the only writer of
-its document.
+Each write is a single-document update (for example, setting
+`questions.<i>.answer` and `questions.<i>.status`). The live session is
+the only writer of its document.
 
 **The `/turns` contract doesn't change.**
-`GET /internal/v1/interviews/{id}/turns` (decision 049) flattens the
-exchanges into the same list Evaluation Service reads today: `seq`
-(= `turn_seq`), `question_text`, `answer_text`, `status`,
-`retrieved_chunk_ids` (the planned question's `chunk_ids`). Evaluation
-Service needs no change. A `kind` field may be added; extra fields don't
-break the existing client.
+`GET /internal/v1/interviews/{id}/turns` (decision 049) lists the asked
+and answered questions in the same shape Evaluation Service reads today:
+`seq`, `question_text` (= `text`), `answer_text`, `status`,
+`retrieved_chunk_ids` (= `chunk_ids`). Evaluation Service needs no
+change.
 
 Local development runs MongoDB as a container in `docker-compose.yml`.
 Production uses MongoDB Atlas, chosen at deployment time.
@@ -2494,12 +2471,12 @@ Production uses MongoDB Atlas, chosen at deployment time.
   and the interview session is the part of the system where a document
   store fits best.
 - **The data is a tree that is read and written as a whole.** A plan
-  with questions, each with its exchanges, is one-to-many nested data,
+  with its questions, each carrying its answer, is one-to-many nested data,
   always loaded by `interview_id`. That is the case document models suit
   (DDIA, Chapter 2). In Postgres it would be several tables or JSONB
   columns.
-- **Single-document writes are atomic.** Appending an exchange and
-  recording its decision happen together, without a transaction.
+- **Single-document writes are atomic.** Storing an answer and moving
+  its question's status happen together, without a transaction.
 - **The service boundary contains the change.** Evaluation reads turns
   over HTTP, never from the table (decisions 021, 049), so only Voice
   Service changes.

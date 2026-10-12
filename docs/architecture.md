@@ -448,22 +448,23 @@ above and delete it here.
   from a new Repository Service endpoint,
   `GET /internal/v1/repositories/{id}/areas`. It retrieves 2 chunks per area,
   for at most `MAX_QUESTIONS` areas, using `filename_prefix`, and writes the
-  whole ordered plan in one LLM call.
+  whole ordered plan in one LLM call. Questions are scenario-based and never
+  name code (decision 048's rules, now in the planning prompt).
 - `plan_status` (`generating` / `ready` / `failed`) lives only in Voice
   Service. Core API proxies it to the setup page, which shows "Preparing your
   interview…" and enables Start when the plan is `ready`. On a transient
   failure, planning is retried once automatically, then a "Try again" button
   is shown. Decision 036's interview states are unchanged.
-- During the interview there is no retrieval and no question generation for
-  planned questions. After each answer a decision prompt returns `next` or
-  one follow-up (cap: one per planned question), with a stored `reason`.
+- During the interview there is no retrieval and no LLM call: Voice Service
+  asks each planned question in order, stores the answer, and moves on.
+  There are no follow-up questions.
 - The interview-session data flow's steps 4 and 6 change accordingly, and
   Voice Service no longer calls Repository Service during the interview.
 
 **Interview sessions in MongoDB (decision 053, supersedes 040).**
 - Voice Service stores one document per interview in a MongoDB collection,
-  `interview_sessions`: the plan, with each planned question's exchanges
-  (planned question and follow-up) nested under it. The `turns` table and
+  `interview_sessions`: the plan, with each question's answer and timings
+  stored on it. The `turns` table and
   Voice Service's Postgres pool are removed.
 - `GET /internal/v1/interviews/{id}/turns` keeps its response shape, so
   Evaluation Service doesn't change.
