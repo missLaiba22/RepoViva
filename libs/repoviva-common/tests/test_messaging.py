@@ -9,6 +9,7 @@ from repoviva_common.messaging import (
     build_message,
     handle_one,
     publish_event,
+    publish_event_with_retry,
     send_job,
 )
 
@@ -104,3 +105,26 @@ def test_publish_event_raises_on_failed_entry(monkeypatch):
 
     with pytest.raises(MessagingError):
         publish_event("repoviva", "s", "t", {})
+
+
+async def test_publish_with_retry_retries_then_succeeds(monkeypatch):
+    calls = []
+
+    def flaky(bus, source, type, data):
+        calls.append(type)
+        if len(calls) == 1:
+            raise MessagingError("throttled")
+
+    monkeypatch.setattr(messaging, "publish_event", flaky)
+
+    assert await publish_event_with_retry("b", "s", "t", {}, retry_delays=(0.0,))
+    assert len(calls) == 2
+
+
+async def test_publish_with_retry_gives_up_without_raising(monkeypatch):
+    def down(*args):
+        raise MessagingError("down")
+
+    monkeypatch.setattr(messaging, "publish_event", down)
+
+    assert not await publish_event_with_retry("b", "s", "t", {}, retry_delays=(0.0,))

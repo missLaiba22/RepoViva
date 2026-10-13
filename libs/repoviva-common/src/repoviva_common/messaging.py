@@ -122,6 +122,33 @@ def publish_event(bus_name: str, source: str, type: str, data: dict[str, Any]) -
     return message
 
 
+# Backoff between publish attempts. Retries are safe: consumers are idempotent.
+PUBLISH_RETRY_DELAYS_SECONDS = (0.5, 2.0)
+
+
+async def publish_event_with_retry(
+    bus_name: str,
+    source: str,
+    type: str,
+    data: dict[str, Any],
+    *,
+    retry_delays: tuple[float, ...] = PUBLISH_RETRY_DELAYS_SECONDS,
+) -> bool:
+    """publish_event for async services, retried with backoff.
+
+    Never raises: returns False, after logging, if every attempt failed.
+    """
+    for attempt, delay in enumerate((0.0, *retry_delays), start=1):
+        await asyncio.sleep(delay)
+        try:
+            await asyncio.to_thread(publish_event, bus_name, source, type, data)
+            return True
+        except MessagingError:
+            logger.warning("publishing %s failed (attempt %d)", type, attempt, exc_info=True)
+    logger.error("%s lost after %d attempts: %s", type, len(retry_delays) + 1, data)
+    return False
+
+
 async def run_worker(handlers: Mapping[str, Handler], *, stop: asyncio.Event) -> None:
     """Poll each queue URL in `handlers` until `stop` is set.
 
