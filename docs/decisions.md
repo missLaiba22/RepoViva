@@ -2715,7 +2715,7 @@ these.
 
 ## 057 — Queues for jobs, events for facts; HTTP only for queries (AWS SQS + EventBridge)
 
-*Status: decided 2026-10-13. Ingestion jobs implemented 2026-10-13; the rest not yet.*
+*Status: decided 2026-10-13. Ingestion jobs implemented 2026-10-13; `interview.ended` and `report-jobs` 2026-10-14; the rest not yet.*
 
 **Decision:**
 Every inter-service interaction is sorted by one question: **does the
@@ -2735,14 +2735,21 @@ Applied to today's calls:
 | Core → Repo `POST /repositories/{id}/ingest` | Job on SQS `ingestion-jobs` |
 | Core → Voice `POST /interviews/{id}/plan` | Job on SQS `planning-jobs` |
 | Voice → Core `POST /interviews/{id}/events` | Event `interview.ended` → queues `core-interview-events` and `evaluation-interview-events` |
-| Core → Eval `POST /reports` | Removed from the normal path: Evaluation consumes `interview.ended` |
+| Core → Eval `POST /reports` | Removed: Evaluation consumes `interview.ended`; recovery and retry send a job on SQS `report-jobs` |
 | Repo → Core `POST /repositories/{id}/events` | Events `ingestion.started` / `completed` / `failed` → queue `core-ingestion-events` |
 | Token consume, `/areas`, `/retrieve`, `/chunks`, `/turns`, report read, plan status | Unchanged (HTTP) |
 
-`POST /internal/v1/reports` stays on Evaluation Service as the **recovery
-and retry** path only (Core API's lazy re-trigger on 404, and the user's
-report retry). The frontend's polling and the interview WebSocket are
-unchanged.
+**Recovery and retry** (Core API's lazy re-trigger on 404, and the user's
+report retry) send a `report.requested` job on `report-jobs`, and
+`POST /internal/v1/reports` is removed. Evaluation's worker handles both
+queues the same way, so every report runs from a message and survives a
+crash. The frontend's polling and the interview WebSocket are unchanged.
+
+*Amended 2026-10-13 (before Part 3):* the first version kept
+`POST /internal/v1/reports` as HTTP for recovery and retry. That
+contradicted the rule above (a trigger is a job) and left reports started
+that way on `BackgroundTasks`, so Evaluation would still have needed
+startup resume.
 
 **Message shape:**
 Jobs and events share one envelope:
@@ -2849,12 +2856,12 @@ redelivery.
 **Supersedes / amends:**
 028 (the trigger no longer stays HTTP), 029 (callbacks become events; loose
 state machine and deferred dedup kept), 036 (end of session reported via
-EventBridge), 049 (Evaluation consumes `interview.ended`; Core's HTTP
-trigger remains only for recovery and retry), 052 (planning trigger via
+EventBridge), 049 (Evaluation consumes `interview.ended`; recovery and
+retry go through `report-jobs`; `POST /internal/v1/reports` removed), 052 (planning trigger via
 SQS).
 
 **Tradeoff:**
-- More infrastructure to run and watch: a bus, 5 queues, 5 DLQs, alarms,
+- More infrastructure to run and watch: a bus, 6 queues, 6 DLQs, alarms,
   and one worker per service.
 - At-least-once delivery: every consumer must stay idempotent, and the
   claim rule above becomes load-bearing.

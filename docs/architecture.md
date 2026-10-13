@@ -527,11 +527,12 @@ above and delete it here.
 - Rule: queries stay HMAC-signed HTTP; jobs go on SQS; events go on the
   EventBridge bus `repoviva`, routed to one SQS queue per consumer. Every
   queue has a DLQ.
-- Jobs: `ingestion-jobs` (Core API → Repository Service) and
-  `planning-jobs` (Core API → Voice Service) replace the HTTP triggers.
+- Jobs: `ingestion-jobs` (Core API → Repository Service),
+  `planning-jobs` (Core API → Voice Service) and `report-jobs` (Core API →
+  Evaluation, recovery and retry only) replace the HTTP triggers;
+  `POST /internal/v1/reports` is removed.
 - Events: `interview.ended` (Voice) is consumed by Core API (status) and
-  Evaluation (report), so Core no longer triggers reports;
-  `POST /internal/v1/reports` stays only for recovery and retry.
+  Evaluation (report), so Core no longer triggers reports on the normal path.
   `ingestion.*` (Repository Service) is consumed by Core API.
 - Each service runs an API and a worker from the same image; workers call
   the existing job functions. Jobs rerun unless the stored status is
