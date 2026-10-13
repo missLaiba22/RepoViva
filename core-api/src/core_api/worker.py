@@ -1,4 +1,4 @@
-"""Core API worker: consumes `interview.ended` from SQS (decision 057).
+"""Core API worker: consumes `interview.ended` and `ingestion.*` events (decision 057).
 
 Run with `python -m core_api.worker`, from the same image as the API.
 Core API is sync, so each handler runs in a thread.
@@ -18,10 +18,10 @@ from repoviva_common.messaging import Message, close_messaging, open_messaging, 
 from core_api.config import get_settings
 from core_api.db import SessionLocal
 from core_api.interviews import service as interviews_service
+from core_api.repositories import service as repositories_service
 
-# Interview's foreign keys name these tables; SQLAlchemy resolves them only
-# if their models are loaded. The API loads them through its routers.
-from core_api.repositories import models as _repositories_models  # noqa: F401
+# Interview's foreign keys name the users table; SQLAlchemy resolves it only
+# if its model is loaded. The API loads every model through its routers.
 from core_api.users import models as _users_models  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,44 @@ async def handle_interview_ended(message: Message) -> None:
     await asyncio.to_thread(end_interview, InterviewEnded.model_validate(message.data))
 
 
+IngestionEventType = Literal["ingestion.started", "ingestion.completed", "ingestion.failed"]
+
+
+class IngestionEvent(BaseModel):
+    """`data` of Repository Service's `ingestion.*` events."""
+
+    repository_id: int
+    error_message: str | None = None
+
+
+def apply_ingestion_event(event_type: IngestionEventType, event: IngestionEvent) -> None:
+    """Out-of-order, late and duplicate events are expected (decision 029):
+    a rejected transition or an unknown repository is handled by doing nothing."""
+    with SessionLocal() as db:
+        try:
+            repo = repositories_service.apply_ingestion_event(
+                db,
+                repository_id=event.repository_id,
+                event_type=event_type,
+                error_message=event.error_message,
+            )
+        except repositories_service.IllegalTransitionError as exc:
+            logger.info("repository %d: %s ignored: %s", event.repository_id, event_type, exc)
+            return
+    if repo is None:
+        logger.warning("repository %d: %s for unknown repository", event.repository_id, event_type)
+
+
+class _IngestionMessageType(BaseModel):
+    type: IngestionEventType
+
+
+async def handle_ingestion_event(message: Message) -> None:
+    event_type = _IngestionMessageType(type=message.type).type
+    event = IngestionEvent.model_validate(message.data)
+    await asyncio.to_thread(apply_ingestion_event, event_type, event)
+
+
 async def main() -> None:
     settings = get_settings()
     open_messaging(
@@ -72,9 +110,13 @@ async def main() -> None:
     with contextlib.suppress(NotImplementedError):
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
 
-    logger.info("worker started: queue=%s", settings.interview_events_queue_url)
+    handlers = {
+        settings.interview_events_queue_url: handle_interview_ended,
+        settings.ingestion_events_queue_url: handle_ingestion_event,
+    }
+    logger.info("worker started: queues=%s", list(handlers))
     try:
-        await run_worker({settings.interview_events_queue_url: handle_interview_ended}, stop=stop)
+        await run_worker(handlers, stop=stop)
     finally:
         close_messaging()
 

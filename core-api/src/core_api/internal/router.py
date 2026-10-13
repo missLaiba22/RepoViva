@@ -6,7 +6,7 @@ All requests here carry an HMAC signature (decision 027) verified by
 with 401.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 from repoviva_common.dependencies import hmac_dependency
 from sqlalchemy.orm import Session
@@ -14,67 +14,15 @@ from sqlalchemy.orm import Session
 from core_api.config import get_settings
 from core_api.db import get_db
 from core_api.internal.schemas import (
-    IngestionEventBody,
     SessionTokenConsumeBody,
     SessionTokenConsumeResponse,
 )
 from core_api.interviews import service as interviews_service
-from core_api.repositories import service as repositories_service
-from core_api.repositories.service import IllegalTransitionError
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
 
 
 verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
-
-
-@router.post(
-    "/repositories/{repository_id}/events",
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(verify_hmac)],
-    responses={
-        401: {"description": "Missing or invalid HMAC signature"},
-        404: {"description": "Repository not found"},
-        422: {"description": "Illegal state transition for current status"},
-    },
-)
-def receive_ingestion_event(
-    repository_id: int,
-    body: IngestionEventBody,
-    db: Session = Depends(get_db),
-) -> dict[str, str]:
-    """Receive an ingestion status event from Repository Service.
-
-    Deduplication by event_id is deferred for MVP — see slice 3 close-out
-    of decision 028. Event ordering is defended against by a loose state
-    machine in the service layer (see repositories/service.py).
-    """
-    error_message: str | None = None
-    if body.event_type == "ingestion.failed" and body.data is not None:
-        val = body.data.get("error_message")
-        if isinstance(val, str):
-            error_message = val
-
-    try:
-        repo = repositories_service.apply_ingestion_event(
-            db,
-            repository_id=repository_id,
-            event_type=body.event_type,
-            error_message=error_message,
-        )
-    except IllegalTransitionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-
-    if repo is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Repository not found",
-        )
-
-    return {"status": "accepted", "repository_id": str(repository_id)}
 
 
 @router.post(

@@ -39,8 +39,10 @@ class Settings(BaseSettings):
     ingestion_jobs_queue_url: str
     report_jobs_queue_url: str
     planning_jobs_queue_url: str
-    # Where the worker receives Voice Service's interview.ended.
+    # Where the worker receives Voice Service's interview.ended and
+    # Repository Service's ingestion.* events.
     interview_events_queue_url: str
+    ingestion_events_queue_url: str
 
     # Where Voice Service lives — question plan status (decision 052).
     voice_service_base_url: str

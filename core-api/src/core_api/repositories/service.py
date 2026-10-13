@@ -82,14 +82,12 @@ def list_repositories_for_user(
     )
     return list(db.scalars(stmt))
 
-# Add to core-api/src/core_api/repositories/service.py
-
 class IllegalTransitionError(Exception):
     """Raised when an ingestion event would apply an illegal state transition.
 
-    Domain-level exception — the internal router turns this into a 422
-    response. Kept here (not in the router) so the service layer stays
-    the single source of truth for the state machine, per decision 026.
+    The worker treats it as a duplicate or late event (decision 057). Kept
+    here so the service layer stays the single source of truth for the
+    state machine, per decision 026.
     """
 
 
