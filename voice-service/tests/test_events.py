@@ -1,26 +1,18 @@
 """The `interview.ended` event Voice publishes (decision 057)."""
 
-import pytest
-from repoviva_common.messaging import MessagingError
-
 from voice_service.clients import events
 from voice_service.clients.events import InterviewEventPublisher
 
 
-@pytest.fixture
-def published(monkeypatch):
-    calls: list[tuple] = []
+async def test_interview_ended_contract(monkeypatch):
+    published: list[tuple] = []
 
-    def fake_publish(bus, source, type, data):
-        calls.append((bus, source, type, data))
-        if len(calls) == 1 and data.get("error_message") == "fail once":
-            raise MessagingError("throttled")
+    async def fake_publish(bus, source, type, data):
+        published.append((bus, source, type, data))
+        return True
 
-    monkeypatch.setattr(events, "publish_event", fake_publish)
-    return calls
+    monkeypatch.setattr(events, "publish_event_with_retry", fake_publish)
 
-
-async def test_interview_ended_contract(published):
     await InterviewEventPublisher("repoviva").interview_ended(
         interview_id=7, repository_id=15, outcome="interrupted", error_message="socket closed",
     )
@@ -30,11 +22,3 @@ async def test_interview_ended_contract(published):
         {"interview_id": 7, "repository_id": 15, "outcome": "interrupted",
          "error_message": "socket closed"},
     )]
-
-
-async def test_publish_is_retried(published):
-    await InterviewEventPublisher("repoviva", retry_delays_s=(0.0,)).interview_ended(
-        interview_id=7, repository_id=15, outcome="completed", error_message="fail once",
-    )
-
-    assert len(published) == 2
