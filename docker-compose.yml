@@ -20,6 +20,17 @@ services:
     volumes:
       - repoviva_mongo_data:/data/db
 
+  # SQS locally (decision 057); same code path as AWS, only AWS_ENDPOINT_URL differs.
+  localstack:
+    image: localstack/localstack:4.9
+    container_name: repoviva-localstack
+    environment:
+      SERVICES: sqs
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./infra/localstack/init-queues.sh:/etc/localstack/init/ready.d/init-queues.sh
+
 volumes:
   repoviva_pg_data:
   repoviva_mongo_data:
