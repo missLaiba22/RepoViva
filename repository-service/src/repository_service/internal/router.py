@@ -10,7 +10,6 @@ import logging
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Query,
@@ -19,19 +18,14 @@ from fastapi import (
 from pydantic import BaseModel, Field
 from repoviva_common.dependencies import hmac_dependency
 
-from repository_service.config import Settings, get_settings
+from repository_service.config import get_settings
 from repository_service.db import get_db_pool
 from repository_service.indexing.embedder import EMBEDDER
-from repository_service.ingestion.orchestrator import run_ingestion
 from repository_service.retrieval import get_chunks_by_ids, list_areas, search_chunks
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
-
-
-class IngestTriggerBody(BaseModel):
-    github_url: str
 
 
 class RetrieveRequestBody(BaseModel):
@@ -56,31 +50,6 @@ class AreasResponse(BaseModel):
 
 
 verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
-
-
-@router.post(
-    "/repositories/{repository_id}/ingest",
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(verify_hmac)],
-)
-async def ingest_trigger(
-    repository_id: int,
-    body: IngestTriggerBody,
-    background_tasks: BackgroundTasks,
-    settings: Settings = Depends(get_settings),
-) -> dict[str, str]:
-    """Accept an ingest trigger from Core API and schedule the pipeline.
-
-    Returns 202 immediately; the pipeline runs asynchronously via
-    BackgroundTasks after the response is sent.
-    """
-    background_tasks.add_task(
-        run_ingestion,
-        repository_id=str(repository_id),
-        github_url=body.github_url,
-        workspace_root=settings.workspace_root,
-    )
-    return {"status": "accepted", "repository_id": str(repository_id)}
 
 
 @router.post(

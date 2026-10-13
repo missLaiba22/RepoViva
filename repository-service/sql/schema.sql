@@ -46,3 +46,13 @@ CREATE TABLE IF NOT EXISTS code_chunks (
 -- table, so its k-means lists were never trained on real data. Drop it
 -- from existing databases so they get exact search too.
 DROP INDEX IF EXISTS "code_chunks__vector__embedding";
+
+-- One row per ingestion job (decision 057). Lets a redelivered SQS message
+-- check stored status: ready/failed are terminal, in_progress means the last
+-- attempt died and the job reruns. The user-visible status lives in Core API.
+CREATE TABLE IF NOT EXISTS ingestion_jobs (
+    repository_id TEXT PRIMARY KEY,
+    github_url TEXT NOT NULL,
+    status TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

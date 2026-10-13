@@ -28,7 +28,10 @@ Prerequisites: Python 3.11+, `uv`, Git, Postgres running (`docker compose up -d`
 uv sync
 cp .env.example .env        # then fill in the values below
 uv run uvicorn repository_service.main:app --reload --port 8001
+uv run python -m repository_service.worker   # ingestion jobs from SQS (decision 057)
 ```
+
+The worker needs LocalStack running (`docker compose up -d` creates the `ingestion-jobs` queue and its DLQ).
 
 ## Tests
 

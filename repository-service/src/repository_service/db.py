@@ -1,9 +1,8 @@
 """FastAPI-owned asyncpg pool for Repository Service.
 
-The pool is opened in main.py's lifespan and closed on shutdown.
-Background tasks (e.g. the ingestion orchestrator) call get_db_pool()
-to reuse the same pool — Depends() is not available outside request
-scope.
+Opened in main.py's lifespan (API) or worker.py's main (worker).
+Code outside request scope, like the ingestion orchestrator, calls
+get_db_pool() to reuse it.
 """
 
 from __future__ import annotations

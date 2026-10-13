@@ -8,8 +8,8 @@ from typing import Final
 
 from cocoindex.ops.litellm import LiteLLMEmbedder
 
-# Shared CocoIndex embedding operation. Reads VOYAGE_API_KEY from the
-# process env via litellm's provider lookup.
+# Shared CocoIndex embedding operation. litellm reads VOYAGE_API_KEY from the
+# process env, set at startup by config.export_provider_keys.
 EMBEDDER: Final = LiteLLMEmbedder("voyage/voyage-4-lite")
 
 

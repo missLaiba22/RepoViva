@@ -8,6 +8,7 @@ test if reached, which is how "rejected before any embedding" is checked.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,7 +19,8 @@ from repository_service.indexing.runner import (
     count_chunks,
     run_indexing,
 )
-from repository_service.ingestion import orchestrator
+from repository_service.ingestion import jobs, orchestrator
+from repository_service.ingestion.jobs import IngestionJob, JobStatus
 
 
 def _write(root: Path, rel: str, text: str) -> None:
@@ -85,11 +87,20 @@ async def test_orchestrator_reports_too_large_as_failed(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator, "fetch_repository", fake_fetch)
     monkeypatch.setattr(orchestrator, "run_indexing", fake_run_indexing)
     monkeypatch.setattr(orchestrator, "get_db_pool", lambda: None)
-
-    await orchestrator.run_ingestion(
-        repository_id="14", github_url="https://github.com/x/y",
-        workspace_root=Path("/unused"),
+    monkeypatch.setattr(
+        orchestrator, "get_settings", lambda: SimpleNamespace(workspace_root=Path("/unused")),
     )
+
+    async def fake_get(_pool, repository_id):
+        return IngestionJob(repository_id, "https://github.com/x/y", JobStatus.IN_PROGRESS)
+
+    async def fake_set_status(_pool, _repository_id, _status):
+        pass
+
+    monkeypatch.setattr(jobs, "get", fake_get)
+    monkeypatch.setattr(jobs, "set_status", fake_set_status)
+
+    await orchestrator.run_ingestion("14")
 
     assert events[-1] == (
         "14", "ingestion.failed",
