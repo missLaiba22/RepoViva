@@ -33,6 +33,7 @@ route_event() {
 # Jobs
 create_queue_with_dlq ingestion-jobs
 create_queue_with_dlq report-jobs
+create_queue_with_dlq planning-jobs
 
 # Events
 awslocal events describe-event-bus --name "${BUS}" >/dev/null 2>&1 \
