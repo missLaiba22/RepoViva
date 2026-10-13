@@ -523,12 +523,30 @@ above and delete it here.
 - One Voice WebSocket connection is one interview, so a single ID follows
   an interview through all four services.
 
+**Queues for jobs, events for facts (decision 057, amends 028, 029, 036, 049, 052).**
+- Rule: queries stay HMAC-signed HTTP; jobs go on SQS; events go on the
+  EventBridge bus `repoviva`, routed to one SQS queue per consumer. Every
+  queue has a DLQ.
+- Jobs: `ingestion-jobs` (Core API → Repository Service) and
+  `planning-jobs` (Core API → Voice Service) replace the HTTP triggers.
+- Events: `interview.ended` (Voice) is consumed by Core API (status) and
+  Evaluation (report), so Core no longer triggers reports;
+  `POST /internal/v1/reports` stays only for recovery and retry.
+  `ingestion.*` (Repository Service) is consumed by Core API.
+- Each service runs an API and a worker from the same image; workers call
+  the existing job functions. Jobs rerun unless the stored status is
+  terminal, so a redelivered message after a crash finishes the work.
+  Repository Service gets an `ingestion_jobs` table. Startup resume is
+  removed once redelivery covers it.
+- `repoviva_common/messaging.py` wraps `boto3` (send job, publish event,
+  run worker); the message envelope carries the request ID (decision 056).
+  IAM replaces HMAC on queued paths. LocalStack runs SQS and EventBridge
+  locally.
+
 ## Future Evolution
 
 Open decisions that will shape architecture:
 
-- Choice of background job system inside Repository Service. Real ingestion (clone → chunk → embed via CocoIndex, decisions 030–031) currently runs on FastAPI `BackgroundTasks`; revisit if concurrency, retries, or observability needs outgrow that.
-- Whether to move off HTTP callbacks (decisions 024–026, 029) to a message broker — decision 029 names the revisit triggers (callback drop rate, event volume growth, a second event consumer)
 - Choice of managed Postgres provider (Supabase or Neon)
 - Full data model (fields per entity, per-service schemas)
 - Streaming STT (live captions, server-side end-of-speech detection) and barge-in (decisions 043, 045)

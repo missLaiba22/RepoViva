@@ -2710,3 +2710,167 @@ The ID lives in a context variable. Work started on a raw thread
 Distributed tracing (OpenTelemetry) is added: trace and span IDs replace
 request IDs, and OTel's middleware and httpx instrumentation replace
 these.
+
+---
+
+## 057 — Queues for jobs, events for facts; HTTP only for queries (AWS SQS + EventBridge)
+
+*Status: decided 2026-10-13. Ingestion jobs implemented 2026-10-13; the rest not yet.*
+
+**Decision:**
+Every inter-service interaction is sorted by one question: **does the
+caller need the answer to continue?**
+
+- **Query** (yes) → stays HMAC-signed HTTP (decision 027).
+- **Job** ("do X", one consumer) → an **SQS** queue owned by the service
+  that does the work.
+- **Event** ("X happened", any number of consumers) → the **EventBridge**
+  bus `repoviva`; one rule per consumer routes it into that consumer's own
+  SQS queue.
+
+Applied to today's calls:
+
+| Call today | Becomes |
+|---|---|
+| Core → Repo `POST /repositories/{id}/ingest` | Job on SQS `ingestion-jobs` |
+| Core → Voice `POST /interviews/{id}/plan` | Job on SQS `planning-jobs` |
+| Voice → Core `POST /interviews/{id}/events` | Event `interview.ended` → queues `core-interview-events` and `evaluation-interview-events` |
+| Core → Eval `POST /reports` | Removed from the normal path: Evaluation consumes `interview.ended` |
+| Repo → Core `POST /repositories/{id}/events` | Events `ingestion.started` / `completed` / `failed` → queue `core-ingestion-events` |
+| Token consume, `/areas`, `/retrieve`, `/chunks`, `/turns`, report read, plan status | Unchanged (HTTP) |
+
+`POST /internal/v1/reports` stays on Evaluation Service as the **recovery
+and retry** path only (Core API's lazy re-trigger on 404, and the user's
+report retry). The frontend's polling and the interview WebSocket are
+unchanged.
+
+**Message shape:**
+Jobs and events share one envelope:
+`{ message_id, type, occurred_at, request_id, data }`. `message_id` is a
+UUID (today's `event_id`). `request_id` carries decision 056's ID across
+the hop; the consumer restores it into its context variable. `data` is the
+contract: a Pydantic model on each side, like today's HTTP bodies, never a
+shared model. `interview.ended` carries `interview_id`, `repository_id`,
+`outcome` and `error_message?`, so Evaluation never needs to call back. Job
+messages carry the id plus only what the worker can't load itself
+(ingestion: `github_url`, which Repository Service doesn't store).
+
+**Consuming:**
+Each service runs a **worker** process from the same image as its API
+(`python -m <pkg>.worker`). It long-polls its queues and calls the existing
+job functions (`run_ingestion`, `run_planning`, `run_generation`). A
+message is deleted only after its handler returns; a crash means it
+reappears after the visibility timeout. Every queue has a **DLQ**
+(`maxReceiveCount` = 3) with an alarm on its depth. Standard queues, not
+FIFO: decision 029's loose state machine already tolerates out-of-order
+events.
+
+**Idempotency under redelivery:**
+Today `claim()` and `claim_plan()` treat `generating` as "leave it alone".
+That is right for duplicate HTTP triggers, but under SQS a job redelivered
+after a crash would then do nothing and stay stuck. New rule: the consumer
+calls `claim()` (creates the row or does nothing), then **runs the job
+unless the stored status is terminal** (`ready`; for ingestion `ready` or
+`failed`). SQS hides a message from other workers while one holds it, so a
+non-terminal `generating` row means the last attempt died, not that
+someone else is running it.
+
+- Repository Service gets its own `ingestion_jobs` table (`repository_id`,
+  `github_url`, `status`) so ingestion checks stored status like the other
+  jobs. The user-visible status still lives in Core API (decision 024).
+- Event consumers treat a rejected transition (today's 422 on terminal
+  states) as **handled** and delete the message: duplicates and late
+  events are expected.
+- `event_id` dedup stays deferred, as in decision 029; every current
+  consumer is idempotent without it.
+
+**Publishing:**
+From the domain function, after the DB write. Core API keeps today's rule
+for ingestion: if sending the job fails, mark the repository `failed`.
+Voice retries publishing `interview.ended` with backoff; `message_id`
+makes retries harmless. No transactional outbox (see options).
+
+**Shared infrastructure:**
+`repoviva_common/messaging.py` (infrastructure only, decision 054):
+`send_job(queue, type, data)`, `publish_event(type, data)`, and
+`run_worker({queue: handler})`, which handles long polling, delete after
+success, request-ID restore and graceful shutdown. Built on `boto3` (sync,
+since Core API is sync); async services call it through
+`asyncio.to_thread`. Queue URLs, bus name, region and `AWS_ENDPOINT_URL`
+come from each service's settings. It is the only module that imports
+`boto3`.
+
+**Auth:**
+IAM replaces HMAC on queued paths. Each service's ECS task role may send
+or publish only what it produces and receive only from its own queues.
+HMAC stays on the HTTP queries.
+
+**Local development:**
+LocalStack (SQS + EventBridge) in `docker-compose.yml`, with a setup script
+that creates the bus, rules, queues and DLQs. Same code path as AWS; only
+`AWS_ENDPOINT_URL` differs.
+
+**Startup resume:**
+`resume_planning` and `resume_generating` are removed once their job is on
+a queue; redelivery replaces them. Ingestion, which never had resume, gets
+redelivery.
+
+**Why:**
+- The five fire-and-forget calls are best-effort with no retry. A dropped
+  call or a restart leaves rows stuck (`queued`, `in_progress`,
+  `generating`), and ingestion, the longest job, has no recovery at all.
+- `BackgroundTasks` runs heavy work inside the API process with no
+  concurrency limit; many reports at once compete for Groq's daily budget
+  (decision 051).
+- `interview.ended` has two real consumers (Core API's status, Evaluation's
+  report). Core relays it to Evaluation only because Voice can't publish
+  to both. That is decision 029's revisit trigger: "a second consumer of
+  the same events".
+- The project deploys on AWS, where SQS and EventBridge are managed, cheap
+  at this volume, and have DLQs built in.
+
+**Options considered:**
+- Everything on queues, for uniformity. Rejected: queries would need
+  request/reply over queues (correlation IDs, reply queues, timeouts) for
+  more latency and no gain. The rule is uniform; the transport isn't.
+- Keep HTTP, add sender retries + dedup (decision 029's first revisit
+  step). Fixes dropped calls, not restarts, concurrency or fan-out.
+- SNS instead of EventBridge for fan-out. Equivalent; EventBridge chosen
+  for content-based rules, archive/replay and schema discovery at the same
+  cost here.
+- Kafka / MSK or RabbitMQ (Amazon MQ). For high throughput, replay or
+  complex routing; none needed, and both cost more to run.
+- Redis + arq / Celery. Simple locally, but means ElastiCache plus a
+  framework on AWS, and fan-out isn't native.
+- Transactional outbox. Closes the "DB committed, publish failed" gap.
+  Deferred: the gap already exists with HTTP and is handled by marking
+  `failed` or retrying the publish.
+
+**Supersedes / amends:**
+028 (the trigger no longer stays HTTP), 029 (callbacks become events; loose
+state machine and deferred dedup kept), 036 (end of session reported via
+EventBridge), 049 (Evaluation consumes `interview.ended`; Core's HTTP
+trigger remains only for recovery and retry), 052 (planning trigger via
+SQS).
+
+**Tradeoff:**
+- More infrastructure to run and watch: a bus, 5 queues, 5 DLQs, alarms,
+  and one worker per service.
+- At-least-once delivery: every consumer must stay idempotent, and the
+  claim rule above becomes load-bearing.
+- The visibility timeout must exceed each job's worst-case runtime; the
+  ingestion worker extends it while running (`ChangeMessageVisibility`)
+  rather than using one huge timeout.
+- A flow is harder to follow across a queue than across one HTTP call;
+  request IDs in the envelope are required, not optional.
+- Couples the project to AWS; `messaging.py` keeps a broker swap to one
+  module.
+
+**Implementation order:**
+Ingestion jobs → `interview.ended` → planning jobs → ingestion events. Each
+part ships on its own and removes its HTTP path.
+
+**Revisit when:**
+A consumer needs strict ordering (FIFO), a duplicate causes a visible bug
+(add `event_id` dedup), a publish-after-commit gap shows up in practice
+(add an outbox), or volume or replay needs outgrow SQS/EventBridge.
