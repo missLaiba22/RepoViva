@@ -1,10 +1,10 @@
-"""evaluation_client against a mocked HTTP client: what it signs, sends and raises."""
+"""evaluation_client: the report job it sends, and the signed report read."""
 
-import json
 
 import httpx
 import pytest
 from repoviva_common.hmac_auth import SIGNATURE_HEADER, TIMESTAMP_HEADER, verify
+from repoviva_common.messaging import MessagingError
 
 from core_api.config import get_settings
 from core_api.interviews import evaluation_client
@@ -12,7 +12,6 @@ from core_api.interviews.evaluation_client import (
     EvaluationServiceError,
     get_report,
     trigger_report,
-    trigger_report_logged,
 )
 
 
@@ -34,51 +33,29 @@ def assert_signed(request: httpx.Request) -> None:
     )
 
 
-def test_trigger_posts_signed_body():
-    seen = []
-
-    trigger_report(
-        interview_id=7, repository_id=15, outcome="interrupted", http=mock_http(202, seen=seen)
+def test_trigger_sends_report_job(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        evaluation_client, "send_job", lambda queue, type, data: sent.append((queue, type, data))
     )
 
-    (request,) = seen
-    assert request.method == "POST"
-    assert request.url.path == "/internal/v1/reports"
-    assert json.loads(request.content) == {
-        "interview_id": 7,
-        "repository_id": 15,
-        "outcome": "interrupted",
-    }
-    assert_signed(request)
+    trigger_report(interview_id=7, repository_id=15, outcome="interrupted")
+
+    assert sent == [(
+        get_settings().report_jobs_queue_url,
+        "report.requested",
+        {"interview_id": 7, "repository_id": 15, "outcome": "interrupted"},
+    )]
 
 
-def test_trigger_raises_on_error_status():
-    with pytest.raises(EvaluationServiceError, match="500"):
-        trigger_report(interview_id=7, repository_id=15, outcome="completed", http=mock_http(500))
+def test_trigger_raises_when_job_not_sent(monkeypatch):
+    def fail(*args):
+        raise MessagingError("queue down")
 
+    monkeypatch.setattr(evaluation_client, "send_job", fail)
 
-def test_trigger_raises_when_unreachable():
-    def refuse(request):
-        raise httpx.ConnectError("connection refused")
-
-    with pytest.raises(EvaluationServiceError, match="could not reach"):
-        trigger_report(
-            interview_id=7,
-            repository_id=15,
-            outcome="completed",
-            http=httpx.Client(transport=httpx.MockTransport(refuse)),
-        )
-
-
-def test_logged_trigger_swallows_failure(monkeypatch, caplog):
-    def fail(**kwargs):
-        raise EvaluationServiceError("down")
-
-    monkeypatch.setattr(evaluation_client, "trigger_report", fail)
-
-    trigger_report_logged(interview_id=7, repository_id=15, outcome="completed")
-
-    assert "interview 7 failed" in caplog.text
+    with pytest.raises(EvaluationServiceError, match="queue down"):
+        trigger_report(interview_id=7, repository_id=15, outcome="completed")
 
 
 def test_get_report_returns_json_and_signs_empty_body():

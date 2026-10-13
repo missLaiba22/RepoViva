@@ -27,7 +27,6 @@ All user-facing queries are scoped to the current user.
 | GET | `/v1/interviews` | List your interviews, newest first |
 | GET | `/v1/interviews/{id}` | One interview. 404 if missing or not yours |
 | POST | `/internal/v1/repositories/{id}/events` | Ingestion callbacks (HMAC) |
-| POST | `/internal/v1/interviews/{id}/events` | `interview.completed` / `interview.interrupted` from Voice Service. 404 unknown, 422 if not `active` (HMAC) |
 | POST | `/internal/v1/session-tokens/consume` | `{ token }` → `{ interview_id, user_id, repository_id }`. 403 `{ reason }` if unknown, expired or consumed (HMAC) |
 | GET | `/health`, `/health/db` | Liveness / DB check |
 
@@ -40,6 +39,7 @@ uv sync
 cp .env.example .env        # then fill in the values below
 uv run alembic upgrade head
 uv run uvicorn core_api.main:app --reload --port 8000
+uv run python -m core_api.worker   # interview.ended from SQS (decision 057)
 ```
 
 Log in by opening `http://localhost:8000/v1/auth/github/login` in a browser.

@@ -1,20 +1,16 @@
-"""The report trigger after an end event, and GET /v1/interviews/{id}/report.
+"""GET /v1/interviews/{id}/report and its retry.
 
 Through FastAPI, with the DB session, current user, interview service and
 Evaluation Service client faked: no Postgres or other services needed.
 """
 
-import json
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from repoviva_common.hmac_auth import sign
 
 from core_api.auth.dependencies import get_current_user
-from core_api.config import get_settings
 from core_api.db import get_db
-from core_api.internal import router as internal_router
 from core_api.interviews import evaluation_client
 from core_api.interviews import router as interviews_router
 from core_api.main import app
@@ -232,60 +228,3 @@ def test_not_logged_in_is_401(owned, evaluation):
         app.dependency_overrides.clear()
 
     assert response.status_code == 401
-
-
-# --- Trigger after the end event ---------------------------------------------
-
-
-def _post_event(client, event_type):
-    body = json.dumps(
-        {
-            "event_id": "6f1c1f9e-4d4b-4c4a-9a43-3f0f6f3b2b11",
-            "event_type": event_type,
-            "occurred_at": "2026-10-08T12:00:00Z",
-        }
-    ).encode()
-    headers = sign(body=body, secret=get_settings().internal_hmac_secret)
-    return client.post(
-        "/internal/v1/interviews/7/events",
-        content=body,
-        headers={"Content-Type": "application/json", **headers},
-    )
-
-
-@pytest.fixture
-def triggers(monkeypatch):
-    sent: list[dict] = []
-    monkeypatch.setattr(internal_router, "trigger_report_logged", lambda **kw: sent.append(kw))
-    return sent
-
-
-@pytest.mark.parametrize(
-    ("event_type", "outcome"),
-    [("interview.completed", "completed"), ("interview.interrupted", "interrupted")],
-)
-def test_end_event_triggers_report(client, monkeypatch, triggers, event_type, outcome):
-    monkeypatch.setattr(
-        internal_router.interviews_service,
-        "apply_interview_event",
-        lambda db, **kw: interview(status=outcome),
-    )
-
-    response = _post_event(client, event_type)
-
-    assert response.status_code == 202
-    assert triggers == [{"interview_id": 7, "repository_id": 15, "outcome": outcome}]
-
-
-def test_rejected_end_event_sends_no_trigger(client, monkeypatch, triggers):
-    def already_ended(db, **kw):
-        raise internal_router.interviews_service.IllegalTransitionError("already ended")
-
-    monkeypatch.setattr(
-        internal_router.interviews_service, "apply_interview_event", already_ended
-    )
-
-    response = _post_event(client, "interview.completed")
-
-    assert response.status_code == 422
-    assert triggers == []

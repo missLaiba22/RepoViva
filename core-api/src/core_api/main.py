@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from repoviva_common.http import close_sync_client, open_sync_client
-from repoviva_common.messaging import close_sqs_client, open_sqs_client
+from repoviva_common.messaging import close_messaging, open_messaging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -19,7 +19,7 @@ from core_api.users.router import router as users_router
 async def lifespan(app: FastAPI):
     settings = get_settings()
     open_sync_client()
-    open_sqs_client(
+    open_messaging(
         region=settings.aws_region,
         endpoint_url=settings.aws_endpoint_url,
         access_key_id=settings.aws_access_key_id,
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        close_sqs_client()
+        close_messaging()
         close_sync_client()
 
 

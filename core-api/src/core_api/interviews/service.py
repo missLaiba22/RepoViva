@@ -237,18 +237,18 @@ def list_interviews_for_user(db: Session, *, owner_user_id: int) -> list[Intervi
     return list(db.scalars(stmt))
 
 
-# --- Lifecycle events from Voice Service (decision 036) ---------------------
+# --- End of interview, from Voice Service's interview.ended (decisions 036, 057)
 
-InterviewEventType = Literal["interview.completed", "interview.interrupted"]
+InterviewOutcome = Literal["completed", "interrupted"]
 
-_EVENT_TO_TARGET: dict[str, InterviewStatus] = {
-    "interview.completed": InterviewStatus.COMPLETED,
-    "interview.interrupted": InterviewStatus.INTERRUPTED,
+_OUTCOME_TO_TARGET: dict[str, InterviewStatus] = {
+    "completed": InterviewStatus.COMPLETED,
+    "interrupted": InterviewStatus.INTERRUPTED,
 }
 
 
 class IllegalTransitionError(Exception):
-    """The event doesn't fit the interview's current state. Router answers 422.
+    """The end event doesn't fit the interview's current state.
 
     Its own class rather than the repositories one: the two state
     machines are separate, and a caller catching one must not
@@ -256,23 +256,23 @@ class IllegalTransitionError(Exception):
     """
 
 
-def target_status_for(current: str, event_type: InterviewEventType) -> InterviewStatus:
+def target_status_for(current: str, outcome: InterviewOutcome) -> InterviewStatus:
     """Strict transitions (decision 036): only `active` may end.
 
     Pure function so the state machine is testable without a database.
     """
     if current != InterviewStatus.ACTIVE.value:
         raise IllegalTransitionError(
-            f"cannot apply {event_type} to interview in state {current}"
+            f"cannot end interview with {outcome}: it is {current}"
         )
-    return _EVENT_TO_TARGET[event_type]
+    return _OUTCOME_TO_TARGET[outcome]
 
 
-def apply_interview_event(
+def end_interview(
     db: Session,
     *,
     interview_id: int,
-    event_type: InterviewEventType,
+    outcome: InterviewOutcome,
     error_message: str | None = None,
 ) -> Interview | None:
     """Move an `active` interview to `completed` or `interrupted`.
@@ -288,7 +288,7 @@ def apply_interview_event(
         return None
 
     try:
-        target = target_status_for(interview.status, event_type)
+        target = target_status_for(interview.status, outcome)
     except IllegalTransitionError:
         db.rollback()  # release the row lock
         raise
