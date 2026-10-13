@@ -296,16 +296,17 @@ directories, so it can be passed straight to `/retrieve` as
 `filename_prefix`. Always 200, with `areas: []` for a repository with no
 chunks, like `/retrieve`.
 
-**Implemented (decision 052; Core API doesn't call these yet).**
+**Implemented (decisions 052, 057; the live page doesn't use it yet).**
 
-Core API → Voice Service (question plan)
+Planning starts with a `plan.requested` job `{ interview_id, repository_id }`
+on SQS `planning-jobs`, sent by Core API on `POST /v1/interviews` and by
+`POST /v1/interviews/{id}/plan/retry`. Voice Service's worker claims the
+plan (new, or restarts a failed one) and plans unless it is `ready`.
+Core API proxies the status as `GET /v1/interviews/{id}/plan`, and re-sends
+the job if Voice has no plan for an interview that hasn't started.
+
+Core API → Voice Service (question plan status)
 ```
-POST /internal/v1/interviews/{interview_id}/plan
-body: { repository_id }
-→ 202 { interview_id, plan_status, scheduled }
-       (no-op if the plan is generating or ready; replans a failed one;
-        `scheduled` says whether a new run started)
-
 GET  /internal/v1/interviews/{interview_id}/plan
 → 200 { interview_id, plan_status: "generating" | "ready" | "failed",
         error_message, retryable }
@@ -478,8 +479,9 @@ are decided but not built. When each one ships, move it into the sections
 above and delete it here.
 
 **Pre-generated question plan (decision 052, supersedes 034).**
-- `POST /v1/interviews` makes Core API trigger planning on Voice Service:
-  `POST /internal/v1/interviews/{id}/plan` (HMAC-signed) → 202.
+- `POST /v1/interviews` makes Core API send a `plan.requested` job on SQS
+  `planning-jobs` (decision 057); Voice Service's worker plans. If the send
+  fails, the plan-status read re-sends it when Voice has no plan.
 - Voice Service gets the repository's areas (directories with chunk counts)
   from a new Repository Service endpoint,
   `GET /internal/v1/repositories/{id}/areas` (built, see above). It retrieves 2 chunks per area,

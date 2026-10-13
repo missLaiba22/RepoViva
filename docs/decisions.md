@@ -2715,7 +2715,7 @@ these.
 
 ## 057 — Queues for jobs, events for facts; HTTP only for queries (AWS SQS + EventBridge)
 
-*Status: decided 2026-10-13. Ingestion jobs implemented 2026-10-13; `interview.ended` and `report-jobs` 2026-10-14; the rest not yet.*
+*Status: decided 2026-10-13. Ingestion jobs implemented 2026-10-13; `interview.ended`, `report-jobs` and `planning-jobs` 2026-10-14; ingestion events not yet.*
 
 **Decision:**
 Every inter-service interaction is sorted by one question: **does the
@@ -2796,6 +2796,12 @@ From the domain function, after the DB write. Core API keeps today's rule
 for ingestion: if sending the job fails, mark the repository `failed`.
 Voice retries publishing `interview.ended` with backoff; `message_id`
 makes retries harmless. No transactional outbox (see options).
+
+If the `plan.requested` job can't be sent when an interview is created,
+the interview is still created (decision 052 keeps no plan state in
+Core API). When the live page reads the plan status and Voice Service
+has no plan (404), Core API sends the job then: a lazy re-trigger, as
+decision 049 does for reports. *(Added 2026-10-14, before Part 4.)*
 
 **Shared infrastructure:**
 `repoviva_common/messaging.py` (infrastructure only, decision 054):
