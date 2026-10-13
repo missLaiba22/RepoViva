@@ -1,8 +1,7 @@
 """Persistence for `reports` (decisions 049, 050).
 
-The row's status is the only coordination between a trigger, the
-background generation and a startup resume, so every transition is a
-single conditional statement:
+The row's status is the only coordination between deliveries of the same
+message, so every transition is a single conditional statement:
 
     (none)  ──claim──▶ generating ──mark_ready──▶ ready
     failed  ──claim──▶ generating ──mark_failed─▶ failed
@@ -18,9 +17,8 @@ import asyncpg
 from evaluation_service.pipeline import ReportContent
 
 # Inserts a new row, or restarts a failed one. A row that is `generating`
-# or `ready` matches neither branch, so nothing is returned and the
-# trigger is a no-op (decision 049). One statement, so two triggers
-# racing for the same interview can't both win.
+# or `ready` matches neither branch, so nothing is returned. One statement,
+# so two messages racing for the same interview can't both win.
 _CLAIM = """
     INSERT INTO reports (interview_id, repository_id, partial)
     VALUES ($1, $2, $3)
@@ -62,15 +60,6 @@ _MARK_FAILED = """
     SET status = 'failed', error_message = $2, completed_at = now()
     WHERE interview_id = $1 AND status = 'generating'
 """
-
-# Oldest first, so a resume finishes reports in the order they were asked for.
-_LIST_GENERATING = """
-    SELECT interview_id, repository_id, partial
-    FROM reports
-    WHERE status = 'generating'
-    ORDER BY created_at
-"""
-
 
 @dataclass(frozen=True)
 class PendingReport:
@@ -122,10 +111,3 @@ class ReportStore:
     async def mark_failed(self, interview_id: int, error_message: str) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(_MARK_FAILED, interview_id, error_message)
-
-    async def list_generating(self) -> list[PendingReport]:
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(_LIST_GENERATING)
-        return [
-            PendingReport(r["interview_id"], r["repository_id"], r["partial"]) for r in rows
-        ]

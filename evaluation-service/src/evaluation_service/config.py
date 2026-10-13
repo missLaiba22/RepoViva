@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     groq_api_key: str
     eval_llm_model: str = "groq/openai/gpt-oss-120b"
 
+    # SQS (decision 057). Endpoint and keys are set only for LocalStack;
+    # on AWS they stay unset and the task's IAM role is used.
+    aws_region: str = "us-east-1"
+    aws_endpoint_url: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    interview_events_queue_url: str
+    report_jobs_queue_url: str
+
 
 @lru_cache
 def get_settings() -> Settings:

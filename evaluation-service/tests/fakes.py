@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from evaluation_service.clients.repository import Chunk
 from evaluation_service.clients.voice import Turn
 from evaluation_service.grading.llm import JsonLlm
-from evaluation_service.reports import PendingReport
 
 
 def reply(content: str) -> SimpleNamespace:
@@ -126,10 +125,3 @@ class FakeReportStore:
         row = self.rows[interview_id]
         if row["status"] == "generating":
             row.update(status="failed", error_message=error_message)
-
-    async def list_generating(self):
-        return [
-            PendingReport(r["interview_id"], r["repository_id"], r["partial"])
-            for r in self.rows.values()
-            if r["status"] == "generating"
-        ]

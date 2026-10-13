@@ -1,8 +1,9 @@
-"""run_generation and startup resume with a fake store, sources and LLM."""
+"""run_generation with a fake store, sources and LLM."""
 
 import httpx
+import pytest
 
-from evaluation_service.generation import Dependencies, resume_generating, run_generation
+from evaluation_service.generation import Dependencies, run_generation
 from evaluation_service.reports import PendingReport
 from tests.fakes import FakeReportStore, FakeRepository, FakeVoice, chunk, grade, make_llm, turn
 
@@ -64,45 +65,15 @@ async def test_error_message_is_truncated():
     assert len(store.rows[7]["error_message"]) == 500
 
 
-async def test_store_failure_while_marking_failed_is_swallowed():
+async def test_store_failure_while_marking_failed_raises_for_redelivery():
     class StoreDown(FakeReportStore):
         async def mark_failed(self, interview_id, error_message):
             raise OSError("db down")
 
     store = StoreDown({7: generating(7)})
 
-    # Must not raise: it runs as a background task with no one to catch it.
-    await run_generation(PendingReport(7, 15, False), deps(store, voice=BrokenVoice()))
+    # Raises so the worker keeps the message and SQS redelivers it.
+    with pytest.raises(OSError):
+        await run_generation(PendingReport(7, 15, False), deps(store, voice=BrokenVoice()))
 
-    assert store.rows[7]["status"] == "generating"  # left for startup resume
-
-
-async def test_resume_finishes_every_generating_report():
-    store = FakeReportStore(
-        {
-            7: generating(7),
-            8: {**generating(8), "status": "ready"},
-            9: generating(9),
-        }
-    )
-
-    await resume_generating(deps(store, grade(), NOTES, grade(), NOTES))
-
-    assert {i: r["status"] for i, r in store.rows.items()} == {7: "ready", 8: "ready", 9: "ready"}
-
-
-async def test_resume_with_nothing_pending_makes_no_calls():
-    store = FakeReportStore({8: {**generating(8), "status": "ready"}})
-
-    # An empty script: any LLM call would fail on pop().
-    await resume_generating(deps(store))
-
-    assert store.rows[8]["status"] == "ready"
-
-
-async def test_resume_survives_unreachable_database():
-    class StoreDown(FakeReportStore):
-        async def list_generating(self):
-            raise OSError("db down")
-
-    await resume_generating(deps(StoreDown()))
+    assert store.rows[7]["status"] == "generating"

@@ -4,7 +4,7 @@ Turns a finished interview into a report. Each answer gets a correctness and a c
 
 ## What's implemented
 
-- **Trigger.** Core API sends `POST /internal/v1/reports` when an interview ends. It always gets a 202. A new or `failed` report is claimed as `generating` and built in the background. One that is already `generating` or `ready` is left alone, so a repeated trigger is a no-op (decision 049).
+- **Trigger** (decision 057). The worker consumes Voice Service's `interview.ended` event (queue `evaluation-interview-events`) and Core API's `report.requested` jobs for recovery and retry (queue `report-jobs`). Both claim the report and generate it unless it is already `ready`. A row still `generating` means the attempt that held the message died, so it reruns.
 - **Inputs over HTTP**, never from other services' tables (decision 021):
   - the turns from Voice Service (`GET /internal/v1/interviews/{id}/turns`)
   - the exact code chunks behind each question from Repository Service (`POST /internal/v1/repositories/{id}/chunks`), fetched in one batched call
@@ -19,19 +19,18 @@ Turns a finished interview into a report. Each answer gets a correctness and a c
 - **Summary.** Averages are computed in code. One more LLM call writes strengths, areas to improve and files to revisit (only files behind a graded turn).
 - **Partial interviews** (decision 008): an `interrupted` outcome gives `partial: true`. Unanswered turns are listed as `not_answered` and not scored.
 - **Recovery:**
-  - On startup, every report still `generating` (from a crash or reload) is resumed, oldest first.
-  - A failure (Voice, Repository or Groq down, or the daily token limit spent) marks the report `failed` with a short error. The next trigger regenerates it.
-  - Core API re-sends the trigger if it reads a report that doesn't exist yet.
+  - A crash leaves the message on the queue; SQS redelivers it and the report reruns. After 3 failed deliveries it moves to the DLQ.
+  - A failure (Voice, Repository or Groq down, or the daily token limit spent) marks the report `failed` with a short error. A retry job regenerates it.
+  - Core API sends a `report.requested` job if it reads a report that doesn't exist yet.
 
 A six-turn report takes 50–90 s and about 18k tokens.
 
 ## Endpoints
 
-Both are internal, HMAC-signed (decision 027), and called only by Core API.
+Internal, HMAC-signed (decision 027), and called only by Core API.
 
 | Endpoint | Response |
 |---|---|
-| `POST /internal/v1/reports` `{interview_id, repository_id, outcome}` | 202 `{interview_id, status, scheduled}`; `outcome` is `completed` or `interrupted` |
 | `GET /internal/v1/reports/{interview_id}` | The report in its current state (content fields null while `generating`), 404 if none |
 | `GET /health` | No auth |
 
@@ -41,9 +40,10 @@ Report states: `generating` → `ready` or `failed`. The frontend reads reports 
 
 ```
 src/evaluation_service/
-  internal/router.py      POST/GET /internal/v1/reports
+  internal/router.py      GET /internal/v1/reports/{id}
+  worker.py               consumes interview.ended and report.requested from SQS
   internal/hmac_auth.py   sign + verify (decision 027)
-  generation.py           background run: pipeline → ready/failed; startup resume
+  generation.py           claim rule + run: pipeline → ready/failed
   pipeline.py             turns → chunks → grade each turn → summary
   reports.py              reports persistence; each status change is one SQL statement
   clients/voice.py        turns (HMAC)
@@ -59,15 +59,16 @@ evals/                    grader sanity sets, harness and results
 
 ## Running locally
 
-Prerequisites: Postgres (`docker compose up -d` from the repo root), with Voice Service and Repository Service running.
+Prerequisites: Postgres and LocalStack (`docker compose up -d` from the repo root), with Voice Service and Repository Service running.
 
 ```bash
 uv sync
 cp .env.example .env        # fill in GROQ_API_KEY and INTERNAL_HMAC_SECRET
 uv run uvicorn evaluation_service.main:app --port 8003
+uv run python -m evaluation_service.worker   # generates reports from SQS (decision 057)
 ```
 
-No `--reload`: a reload stops a report mid-generation. It resumes on the next start, but that costs the tokens again.
+The worker needs LocalStack running (`docker compose up -d`). Restarting it mid-report reruns that report on redelivery, which costs the tokens again.
 
 To read one interview's report without storing it:
 

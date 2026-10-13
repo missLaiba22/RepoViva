@@ -6,60 +6,17 @@ short-circuits with 401 before the handler runs.
 
 from __future__ import annotations
 
-from typing import Literal
-
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status
 from repoviva_common.dependencies import hmac_dependency
 
 from evaluation_service.config import get_settings
 from evaluation_service.db import get_db_pool
-from evaluation_service.generation import run_generation
-from evaluation_service.reports import PendingReport, ReportStore
+from evaluation_service.reports import ReportStore
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
 
 
-class ReportTriggerBody(BaseModel):
-    interview_id: int
-    repository_id: int
-    outcome: Literal["completed", "interrupted"]
-
-
 verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
-
-
-@router.post(
-    "/reports",
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(verify_hmac)],
-    responses={401: {"description": "Missing or invalid HMAC signature"}},
-)
-async def trigger_report(body: ReportTriggerBody, background_tasks: BackgroundTasks) -> dict:
-    """Start generating the interview's report, unless it is already under way.
-
-    Always 202. A new or `failed` report is claimed and generated in the
-    background; one that is `generating` or `ready` is left alone
-    (decision 049). `scheduled` says which happened.
-    """
-    store = ReportStore(get_db_pool())
-    report = PendingReport(
-        interview_id=body.interview_id,
-        repository_id=body.repository_id,
-        # An interrupted interview still gets a report, marked partial (decision 008).
-        partial=body.outcome == "interrupted",
-    )
-    scheduled = await store.claim(
-        interview_id=report.interview_id,
-        repository_id=report.repository_id,
-        partial=report.partial,
-    )
-    if scheduled:
-        background_tasks.add_task(run_generation, report)
-        report_status = "generating"
-    else:
-        report_status = await store.get_status(report.interview_id)
-    return {"interview_id": report.interview_id, "status": report_status, "scheduled": scheduled}
 
 
 @router.get(

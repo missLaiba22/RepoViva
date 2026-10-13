@@ -1,8 +1,8 @@
-"""Run report generation in the background and record the outcome (decision 049).
+"""Generate reports and record the outcome (decisions 049, 057).
 
-Called from the trigger endpoint through BackgroundTasks, and from the
-lifespan for startup resume. Never raises: every failure ends with the
-row marked `failed`, so the next trigger regenerates it.
+Called by the worker for every `interview.ended` event and `report.requested`
+job. A generation failure ends with the row marked `failed`; only when even
+that can't be stored does it raise, so the message is redelivered.
 """
 
 from __future__ import annotations
@@ -63,27 +63,28 @@ async def run_generation(
         try:
             await deps.store.mark_failed(report.interview_id, message)
         except Exception:
-            # The row stays `generating`; startup resume picks it up.
+            # The row stays `generating`: raise so the message is redelivered.
             logger.exception("interview %d: could not mark report failed", report.interview_id)
+            raise
         return
     logger.info(
         "interview %d: report ready in %.0f s", report.interview_id, time.monotonic() - started
     )
 
 
-async def resume_generating(deps: Dependencies | None = None) -> None:
-    """Startup resume: finish every report left `generating` by a crash or reload.
+async def request_report(report: PendingReport, deps: Dependencies | None = None) -> None:
+    """Claim the report, then generate it unless it is already `ready` (decision 057).
 
-    One at a time, like the turns inside a report: the grading model's
-    per-minute token budget is the bottleneck (decision 051).
+    Claiming creates the row or restarts a failed one. A row still
+    `generating` means the attempt holding the message died, so it reruns.
     """
     deps = deps or default_dependencies()
-    try:
-        pending = await deps.store.list_generating()
-    except Exception:
-        logger.exception("startup resume: could not list unfinished reports")
+    claimed = await deps.store.claim(
+        interview_id=report.interview_id,
+        repository_id=report.repository_id,
+        partial=report.partial,
+    )
+    if not claimed and await deps.store.get_status(report.interview_id) == "ready":
+        logger.info("interview %d: report already ready, skipping", report.interview_id)
         return
-    if pending:
-        logger.info("startup resume: %d unfinished report(s)", len(pending))
-    for report in pending:
-        await run_generation(report, deps)
+    await run_generation(report, deps)
