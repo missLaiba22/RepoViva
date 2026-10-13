@@ -23,16 +23,18 @@ All user-facing queries are scoped to the current user.
 | POST | `/v1/repositories` | `{ github_url }` |
 | GET | `/v1/repositories` | List your repositories |
 | GET | `/v1/repositories/{id}` | Includes ingestion status |
-| POST | `/v1/interviews` | `{ repository_id }` → interview + session token. 404 if not yours, 409 if not `ready` |
+| POST | `/v1/interviews` | `{ repository_id }` → interview + session token, and sends the `plan.requested` job. 404 if not yours, 409 if not `ready` |
 | GET | `/v1/interviews` | List your interviews, newest first |
 | GET | `/v1/interviews/{id}` | One interview. 404 if missing or not yours |
+| GET | `/v1/interviews/{id}/plan` | Question plan status from Voice Service; re-sends the job if Voice has none. 503 if Voice is down |
+| POST | `/v1/interviews/{id}/plan/retry` | Re-sends the job for a missing or retryably failed plan; 409 once the interview started |
 | POST | `/internal/v1/repositories/{id}/events` | Ingestion callbacks (HMAC) |
 | POST | `/internal/v1/session-tokens/consume` | `{ token }` → `{ interview_id, user_id, repository_id }`. 403 `{ reason }` if unknown, expired or consumed (HMAC) |
 | GET | `/health`, `/health/db` | Liveness / DB check |
 
 ## Running locally
 
-Prerequisites: Python 3.11+, `uv`, Postgres running (`docker compose up -d` from the repo root).
+Prerequisites: Python 3.11+, `uv`, Postgres and LocalStack running (`docker compose up -d` from the repo root).
 
 ```bash
 uv sync

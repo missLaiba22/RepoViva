@@ -200,6 +200,17 @@ def test_retry_leaves_a_ready_report_alone(client, owned, evaluation):
     assert evaluation.triggers == []
 
 
+def test_retry_does_not_resend_a_generating_report(client, owned, evaluation):
+    # Regression: a second job for a generating report would run it twice
+    # in parallel, since workers rerun anything not `ready` (decision 057).
+    evaluation.report = {"interview_id": 7, "status": "generating"}
+
+    response = client.post("/v1/interviews/7/report/retry")
+
+    assert response.status_code == 202
+    assert evaluation.triggers == []
+
+
 @pytest.mark.parametrize("status", ["created", "active"])
 def test_retry_before_the_interview_ends_is_404(client, owned, evaluation, status):
     owned["interview"] = interview(status=status)

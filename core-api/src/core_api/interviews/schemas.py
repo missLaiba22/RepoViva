@@ -43,6 +43,17 @@ class InterviewCreatedResponse(InterviewResponse):
     session_token: str
     session_token_expires_at: datetime
 
+class PlanResponse(BaseModel):
+    """GET /v1/interviews/{id}/plan (decision 052): the question plan's status,
+    proxied from Voice Service. Never the questions."""
+
+    interview_id: int
+    plan_status: str  # generating | ready | failed
+    error_message: str | None = None
+    # Only meaningful when `failed`: false means retrying can't help.
+    retryable: bool | None = None
+
+
 class ReportResponse(BaseModel):
     """GET /v1/interviews/{id}/report (decisions 049, 050).
 

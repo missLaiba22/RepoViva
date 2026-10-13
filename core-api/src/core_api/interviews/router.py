@@ -4,21 +4,26 @@ The router only speaks HTTP: it reads the request, calls the service,
 and turns the result or exception into a status code.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from core_api.auth.dependencies import get_current_user
 from core_api.db import get_db
-from core_api.interviews import evaluation_client, service
+from core_api.interviews import evaluation_client, service, voice_client
 from core_api.interviews.models import InterviewStatus
 from core_api.interviews.schemas import (
     InterviewCreate,
     InterviewCreatedResponse,
     InterviewResponse,
+    PlanResponse,
     ReportResponse,
 )
 from core_api.users.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/interviews", tags=["interviews"])
 
@@ -60,7 +65,20 @@ def create_interview(
             detail=f"Repository is '{exc.status}'; interviews need a 'ready' repository",
         )
 
-    base = InterviewResponse.model_validate(result.interview)
+    interview = result.interview
+    # Planning starts now (decision 052). If the job can't be sent, the plan
+    # status read sends it again (decision 057), so creation still succeeds.
+    try:
+        voice_client.request_plan(
+            interview_id=interview.id, repository_id=interview.repository_id
+        )
+    except voice_client.VoiceServiceError:
+        logger.warning(
+            "interview %d: plan job not sent; the status read will resend it",
+            interview.id, exc_info=True,
+        )
+
+    base = InterviewResponse.model_validate(interview)
     return InterviewCreatedResponse(
         **base.model_dump(),
         session_token=result.raw_token,
@@ -100,6 +118,84 @@ def get_interview(
             detail="Interview not found",
         )
     return InterviewResponse.model_validate(interview)
+
+@router.get(
+    "/{interview_id}/plan",
+    response_model=PlanResponse,
+    responses={
+        404: {"description": "Interview not found"},
+        503: {"description": "Voice Service unavailable"},
+    },
+)
+def get_interview_plan(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    """The question plan's status, polled by the live page (decision 052).
+
+    If Voice Service has no plan for an interview that hasn't started, the
+    job was lost: it is sent again here (lazy re-trigger, decision 057).
+    """
+    interview = _owned_interview(db, interview_id=interview_id, owner_user_id=current_user.id)
+    try:
+        plan = voice_client.get_plan_status(interview.id)
+        if plan is None and interview.status == InterviewStatus.CREATED.value:
+            voice_client.request_plan(
+                interview_id=interview.id, repository_id=interview.repository_id
+            )
+            return PlanResponse(interview_id=interview.id, plan_status="generating")
+    except voice_client.VoiceServiceError as exc:
+        raise _plans_unavailable() from exc
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No plan")
+    return PlanResponse(**plan)
+
+
+@router.post(
+    "/{interview_id}/plan/retry",
+    response_model=PlanResponse,
+    responses={
+        404: {"description": "Interview not found"},
+        409: {"description": "Interview has already started"},
+        503: {"description": "Voice Service unavailable"},
+    },
+)
+def retry_interview_plan(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    """"Try again" after a failed plan (decision 052).
+
+    Re-sends the job only for a missing or retryably failed plan. A plan
+    that is generating or ready, or failed for good, is returned as is:
+    re-sending would at best repeat work already under way.
+    """
+    interview = _owned_interview(db, interview_id=interview_id, owner_user_id=current_user.id)
+    if interview.status != InterviewStatus.CREATED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Interview is '{interview.status}'; its plan can no longer change",
+        )
+    try:
+        plan = voice_client.get_plan_status(interview.id)
+        if plan is not None and not (plan["plan_status"] == "failed" and plan["retryable"]):
+            return PlanResponse(**plan)
+        voice_client.request_plan(
+            interview_id=interview.id, repository_id=interview.repository_id
+        )
+    except voice_client.VoiceServiceError as exc:
+        raise _plans_unavailable() from exc
+    return PlanResponse(interview_id=interview.id, plan_status="generating")
+
+
+def _plans_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Interview preparation is unavailable right now; try again shortly",
+    )
+
 
 _ENDED = (InterviewStatus.COMPLETED.value, InterviewStatus.INTERRUPTED.value)
 
@@ -170,14 +266,17 @@ def retry_interview_report(
     """Ask for a `failed` (or missing) report to be generated again.
 
     Reading a failed report doesn't regenerate it (decision 051), so the
-    report page offers this instead. A ready report is returned as is;
-    otherwise the trigger is re-sent, which Evaluation Service makes safe
-    to repeat: generating and ready reports are left alone (decision 049).
+    report page offers this instead. A ready or generating report is
+    returned as is: under redelivery rules a second job for a generating
+    report would generate it twice in parallel (decision 057). Otherwise
+    the job is re-sent.
     """
     interview = _ended_interview(db, interview_id=interview_id, owner_user_id=current_user.id)
 
     try:
         report = evaluation_client.get_report(interview.id)
+        if report is not None and report["status"] == "generating":
+            return _generating(ReportResponse.model_validate(report))
         if report is not None and report["status"] == "ready":
             return ReportResponse.model_validate(report)
         evaluation_client.trigger_report(
@@ -194,14 +293,20 @@ def retry_interview_report(
     return _generating(ReportResponse(interview_id=interview.id, status="generating"))
 
 
-def _ended_interview(db: Session, *, interview_id: int, owner_user_id: int):
-    """The user's interview, if it has ended. 404 otherwise, the same for
-    missing and not-yours so ownership doesn't leak."""
+def _owned_interview(db: Session, *, interview_id: int, owner_user_id: int):
+    """The user's interview. 404 for missing and not-yours alike, so
+    ownership doesn't leak."""
     interview = service.get_interview_for_user(
         db, interview_id=interview_id, owner_user_id=owner_user_id
     )
     if interview is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+    return interview
+
+
+def _ended_interview(db: Session, *, interview_id: int, owner_user_id: int):
+    """The user's interview, if it has ended. 404 otherwise."""
+    interview = _owned_interview(db, interview_id=interview_id, owner_user_id=owner_user_id)
     if interview.status not in _ENDED:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
