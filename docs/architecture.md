@@ -22,6 +22,7 @@ flowchart TB
     end
 
     DB[(PostgreSQL<br/>+ pgvector)]
+    MONGO[(MongoDB<br/>interview sessions)]
 
     subgraph "External Providers"
         GH[GitHub<br/>OAuth + Repos]
@@ -30,34 +31,34 @@ flowchart TB
         TTS[TTS Provider<br/>Deepgram Aura-2]
     end
 
-    FE -- REST --> CORE
-    FE -- WebSocket --> VOICE
+    FE -->|"REST"| CORE
+    FE -->|"WebSocket"| VOICE
 
-    CORE -. ingestion job .-> REPO
-    REPO -. ingestion.* events .-> CORE
-    CORE -. plan job .-> VOICE
-    CORE -- plan status --> VOICE
-    VOICE -. interview.ended .-> CORE
-    VOICE -. interview.ended .-> EVAL
-    CORE -. report job (recovery, retry) .-> EVAL
-    CORE -- read report --> EVAL
-    EVAL -- fetch turns --> VOICE
-    EVAL -- fetch chunks by id --> REPO
-    VOICE -- areas, retrieval --> REPO
-    VOICE -- consume token --> CORE
+    CORE -.->|"ingestion job"| REPO
+    REPO -.->|"ingestion.* events"| CORE
+    CORE -.->|"plan job"| VOICE
+    CORE -->|"plan status"| VOICE
+    VOICE -.->|"interview.ended"| CORE
+    VOICE -.->|"interview.ended"| EVAL
+    CORE -.->|"report job (recovery, retry)"| EVAL
+    CORE -->|"read report"| EVAL
+    EVAL -->|"fetch turns"| VOICE
+    EVAL -->|"fetch chunks by id"| REPO
+    VOICE -->|"areas, retrieval"| REPO
+    VOICE -->|"consume token"| CORE
 
     CORE --> DB
     REPO --> DB
-    VOICE --> DB
+    VOICE --> MONGO
     EVAL --> DB
 
-    CORE -- OAuth --> GH
-    REPO -- fetch repo --> GH
-    REPO -- embeddings (Voyage) --> LLM
-    VOICE -- transcribe --> STT
-    VOICE -- generate --> LLM
-    VOICE -- synthesize --> TTS
-    EVAL -- grade --> LLM
+    CORE -->|"OAuth"| GH
+    REPO -->|"fetch repo"| GH
+    REPO -->|"embeddings (Voyage)"| LLM
+    VOICE -->|"transcribe"| STT
+    VOICE -->|"generate"| LLM
+    VOICE -->|"synthesize"| TTS
+    EVAL -->|"grade"| LLM
 ```
 
 *Solid arrows are HMAC-signed HTTP queries. Dotted arrows go through SQS: jobs straight to the worker's queue, events through the EventBridge bus `repoviva` into one queue per consumer (decision 057). All arrows are implemented.*

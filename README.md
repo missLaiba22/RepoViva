@@ -31,17 +31,17 @@ flowchart LR
     VOICE[Voice Service<br/>plan · live interview]
     EVAL[Evaluation Service<br/>grading · reports]
 
-    FE -- REST --> CORE
-    FE -- WebSocket --> VOICE
-    CORE -. ingestion job .-> REPO
-    REPO -. ingestion.* .-> CORE
-    CORE -. plan job .-> VOICE
-    VOICE -. interview.ended .-> CORE
-    VOICE -. interview.ended .-> EVAL
-    CORE -. report job .-> EVAL
-    VOICE -- areas · retrieve --> REPO
-    EVAL -- turns --> VOICE
-    EVAL -- chunks --> REPO
+    FE -->|"REST"| CORE
+    FE -->|"WebSocket"| VOICE
+    CORE -.->|"ingestion job"| REPO
+    REPO -.->|"ingestion.*"| CORE
+    CORE -.->|"plan job"| VOICE
+    VOICE -.->|"interview.ended"| CORE
+    VOICE -.->|"interview.ended"| EVAL
+    CORE -.->|"report job"| EVAL
+    VOICE -->|"areas · retrieve"| REPO
+    EVAL -->|"turns"| VOICE
+    EVAL -->|"chunks"| REPO
 ```
 
 *Solid: HTTP queries (only the main ones shown). Dotted: SQS jobs and EventBridge events.*
