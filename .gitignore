@@ -31,3 +31,6 @@ workspace/
 
 # Local throwaway scripts and fixture repos.
 repository-service/scratch/
+
+# Local agent instructions, not tracked
+CLAUDE.md
