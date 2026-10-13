@@ -1,9 +1,10 @@
-"""Plan an interview's questions in the background (decision 052).
+"""Plan an interview's questions (decisions 052, 057).
 
-Called from the trigger endpoint through BackgroundTasks, and from the
-lifespan for startup resume. Takes only the interview id and loads the
-rest, and does nothing unless the plan is `generating`, so a rerun is
-harmless. Never raises: every failure ends with the plan `failed`.
+Called by the worker for each `plan.requested` job, after the plan is
+claimed. Takes only the interview id and loads the rest, and does nothing
+unless the plan is `generating`, so a rerun is harmless. A planning
+failure ends with the plan `failed`; only when even that can't be stored
+does it raise, so the message is redelivered.
 """
 
 from __future__ import annotations
@@ -124,19 +125,6 @@ async def _mark_failed(store: SessionStore, interview_id: int, exc: Exception) -
     try:
         await store.fail_plan(interview_id, message, retryable=retryable)
     except Exception:
-        # The plan stays `generating`; startup resume picks it up.
+        # The plan stays `generating`: raise so the message is redelivered.
         logger.exception("interview %d: could not mark plan failed", interview_id)
-
-
-async def resume_planning(deps: Dependencies | None = None) -> None:
-    """Startup resume: finish every plan left `generating` by a crash or reload."""
-    deps = deps or default_dependencies()
-    try:
-        pending = await deps.store.list_generating()
-    except Exception:
-        logger.exception("startup resume: could not list unfinished plans")
-        return
-    if pending:
-        logger.info("startup resume: %d unfinished plan(s)", len(pending))
-    for interview_id in pending:
-        await run_planning(interview_id, deps)
+        raise

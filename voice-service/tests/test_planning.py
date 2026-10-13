@@ -200,3 +200,13 @@ async def test_planner_asks_for_json_and_sends_every_area():
     user_prompt = kwargs["messages"][1]["content"]
     assert "Area 1: api/" in user_prompt and "Area 2: web/" in user_prompt
     assert "web/c.ts:1-9" in user_prompt
+
+
+async def test_failure_that_cannot_be_stored_raises_for_redelivery():
+    class StoreDown(FakeStore):
+        async def fail_plan(self, interview_id, error_message, *, retryable):
+            raise OSError("mongo down")
+
+    # Raises so the worker keeps the message and SQS redelivers it.
+    with pytest.raises(OSError):
+        await run_planning(7, deps(StoreDown(), planner=FakePlanner(failures=2)))

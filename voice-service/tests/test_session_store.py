@@ -76,7 +76,6 @@ async def test_plan_is_not_loaded_until_ready(store):
     await store.claim_plan(interview_id=7, repository_id=15)
 
     assert await store.load_plan(7) is None
-    assert await store.list_generating() == [7]
 
 
 async def test_turns_list_only_asked_questions_in_the_evaluation_shape(store):

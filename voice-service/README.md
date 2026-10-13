@@ -4,12 +4,12 @@ Plans each interview's questions in advance, then runs the live interview over a
 
 ## What's implemented
 
-- **Question plan** (decision 052). Core API triggers `POST /internal/v1/interviews/{id}/plan` when an interview is created. In the background, Voice Service:
+- **Question plan** (decisions 052, 057). Core API sends a `plan.requested` job on SQS `planning-jobs` when an interview is created. The worker claims the plan and:
   - asks Repository Service for the repository's largest areas (`/areas`, one per question, up to `MAX_QUESTIONS`),
   - retrieves `PLAN_CHUNKS_PER_AREA` chunks from each area (`filename_prefix` = the area),
   - writes every question in one LLM call (Groq through litellm, decision 038). Questions are scenario-based and never name code (decision 048).
 
-  `plan_status` moves `generating` → `ready` or `failed`. A transient failure (timeout, 429, unusable reply) is retried once automatically. A repository with no code fails as not retryable. A repeated trigger does nothing unless the plan `failed`, and plans left `generating` by a crash resume at startup.
+  `plan_status` moves `generating` → `ready` or `failed`. A transient failure (timeout, 429, unusable reply) is retried once automatically. A repository with no code fails as not retryable. A repeated job does nothing once the plan is `ready`; a `failed` plan is replanned, and one left `generating` by a crash reruns when SQS redelivers the message.
 - **Admission.** The client sends `session.start {token}` as its first message, never in the URL (decision 035). Voice Service consumes the token once through Core API's `/internal/v1/session-tokens/consume`. A missing, invalid or rejected token closes the socket with code 1008 and one generic reason. A client that sends nothing within 10 s is closed the same way. If the plan isn't `ready`, the client gets `plan_not_ready`, the socket closes with 1008, and the interview is reported `interrupted`.
 - **The interview loop.** The planned questions are asked in order: no LLM call and no retrieval during the interview.
 - **Speech.**
@@ -24,7 +24,6 @@ Plans each interview's questions in advance, then runs the live interview over a
 ## Internal endpoints
 
 ```
-POST /internal/v1/interviews/{id}/plan    { repository_id } → 202 { interview_id, plan_status, scheduled }
 GET  /internal/v1/interviews/{id}/plan    → 200 { interview_id, plan_status, error_message, retryable } · 404
 GET  /internal/v1/interviews/{id}/turns   → 200 { turns: [ { seq, question_text, answer_text, status, retrieved_chunk_ids } ] }
 ```
@@ -48,7 +47,8 @@ Full detail, including close codes: [docs/architecture.md](../docs/architecture.
 
 ```
 src/voice_service/
-  main.py                 app wiring; lifespan opens MongoDB and resumes unfinished plans
+  main.py                 app wiring; lifespan opens MongoDB
+  worker.py               plans interviews from SQS plan.requested jobs
   config.py               settings from env vars
   db.py                   MongoDB client and indexes
   ws.py                   /v1/ws/interview — accepts, wires collaborators, runs the session
@@ -69,12 +69,13 @@ scripts/interview_cli.py  terminal client: mic in, speakers out
 
 ## Running locally
 
-Prerequisites: MongoDB (`docker compose up -d` from the repo root), with Core API and Repository Service running.
+Prerequisites: MongoDB and LocalStack (`docker compose up -d` from the repo root), with Core API and Repository Service running.
 
 ```bash
 uv sync
 cp .env.example .env        # fill in GROQ_API_KEY, DEEPGRAM_API_KEY and INTERNAL_HMAC_SECRET
 uv run uvicorn voice_service.main:app --reload --port 8002
+uv run python -m voice_service.worker   # plans interviews from SQS (decision 057)
 ```
 
 To try an interview:

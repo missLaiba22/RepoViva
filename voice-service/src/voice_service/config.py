@@ -18,13 +18,14 @@ class Settings(BaseSettings):
     repository_service_base_url: str
     internal_hmac_secret: str
 
-    # EventBridge (decision 057). Endpoint and keys are set only for
+    # SQS and EventBridge (decision 057). Endpoint and keys are set only for
     # LocalStack; on AWS they stay unset and the task's IAM role is used.
     aws_region: str = "us-east-1"
     aws_endpoint_url: str | None = None
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
     event_bus_name: str = "repoviva"
+    planning_jobs_queue_url: str
 
     # Interview sessions (decision 053)
     mongodb_uri: str

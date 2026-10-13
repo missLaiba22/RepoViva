@@ -1,5 +1,3 @@
-import asyncio
-import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -10,7 +8,6 @@ from repoviva_common.messaging import close_messaging, open_messaging
 from voice_service.config import get_settings
 from voice_service.db import close_db, ensure_indexes, init_db
 from voice_service.internal.router import router as internal_router
-from voice_service.planning.job import resume_planning
 from voice_service.ws import router as ws_router
 
 logging.basicConfig(
@@ -31,16 +28,9 @@ async def lifespan(app: FastAPI):
         secret_access_key=settings.aws_secret_access_key,
     )
     await ensure_indexes()
-    # Startup resume: plans left `generating` by a crash or reload. In the
-    # background, so the service answers while it runs.
-    resume = asyncio.create_task(resume_planning())
     try:
         yield
     finally:
-        # A plan cut off here stays `generating` and resumes next boot.
-        resume.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await resume
         close_messaging()
         await close_async_client()
         await close_db()

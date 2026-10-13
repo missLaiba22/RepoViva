@@ -1,4 +1,4 @@
-"""Internal endpoints, called only by other RepoViva services (decisions 049, 052).
+"""Internal queries, called only by other RepoViva services (decisions 049, 052).
 
 Every request must carry a valid HMAC signature (decision 027); a failure
 short-circuits with 401 before the handler runs.
@@ -6,26 +6,15 @@ short-circuits with 401 before the handler runs.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from repoviva_common.dependencies import hmac_dependency
 
 from voice_service.config import get_settings
 from voice_service.db import get_db
-from voice_service.planning.job import run_planning
 from voice_service.session.store import PlanStatus, SessionStore
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
-
-
-class PlanTriggerBody(BaseModel):
-    repository_id: int
-
-
-class PlanTriggerResponse(BaseModel):
-    interview_id: int
-    plan_status: PlanStatus
-    scheduled: bool
 
 
 class PlanStatusResponse(BaseModel):
@@ -49,36 +38,6 @@ class TurnsResponse(BaseModel):
 
 
 verify_hmac = hmac_dependency(lambda: get_settings().internal_hmac_secret)
-
-
-@router.post(
-    "/interviews/{interview_id}/plan",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=PlanTriggerResponse,
-    dependencies=[Depends(verify_hmac)],
-    responses={401: {"description": "Missing or invalid HMAC signature"}},
-)
-async def trigger_plan(
-    interview_id: int, body: PlanTriggerBody, background_tasks: BackgroundTasks
-) -> PlanTriggerResponse:
-    """Start planning the interview's questions, unless it is already under way.
-
-    Always 202. A new or `failed` plan is claimed and written in the
-    background; one that is `generating` or `ready` is left alone.
-    `scheduled` says which happened.
-    """
-    store = SessionStore(get_db())
-    scheduled = await store.claim_plan(
-        interview_id=interview_id, repository_id=body.repository_id
-    )
-    if scheduled:
-        background_tasks.add_task(run_planning, interview_id)
-        plan_status = "generating"
-    else:
-        plan_status = (await store.get_plan_state(interview_id)).plan_status
-    return PlanTriggerResponse(
-        interview_id=interview_id, plan_status=plan_status, scheduled=scheduled
-    )
 
 
 @router.get(

@@ -126,11 +126,6 @@ class SessionStore:
         state = PlanState(plan_status="failed", error_message=error_message, retryable=retryable)
         await self._set_if_generating(interview_id, state.model_dump())
 
-    async def list_generating(self) -> list[int]:
-        """Interviews whose planning was cut off by a crash or reload."""
-        cursor = self._sessions.find({"plan_status": "generating"}, {"interview_id": 1})
-        return [doc["interview_id"] async for doc in cursor]
-
     async def get_plan_state(self, interview_id: int) -> PlanState | None:
         doc = await self._sessions.find_one(
             {"interview_id": interview_id},
