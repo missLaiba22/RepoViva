@@ -15,6 +15,7 @@ clone can be added later without making persistence a requirement.
 from __future__ import annotations
 
 import shutil
+import stat
 from pathlib import Path
 
 
@@ -42,6 +43,10 @@ def prepare_clean_workspace(repository_id: str, workspace_root: Path) -> Path:
     """
     path = workspace_for(repository_id, workspace_root)
     if path.exists():
+        # Git makes pack files read-only, and Windows won't delete read-only files.
+        for file in path.rglob("*"):
+            if file.is_file():
+                file.chmod(stat.S_IREAD | stat.S_IWRITE)
         shutil.rmtree(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
