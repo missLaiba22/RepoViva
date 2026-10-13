@@ -68,10 +68,8 @@ def create_repository(
         github_url=payload.github_url,
     )
 
-    # Fire the trigger to Repository Service. If this fails, we mark the
-    # row `failed` immediately and return it to the user — the alternatives
-    # (roll back the row, or leave it silently stuck in `queued`) are worse.
-    # See design question 2 in Step 4 and decision 028.
+    # Send the ingestion job. If that fails, mark the row `failed` now: rolling
+    # it back or leaving it stuck in `queued` is worse (decisions 028, 057).
     try:
         trigger_ingestion(repository_id=repo.id, github_url=repo.github_url)
     except IngestionTriggerError as exc:

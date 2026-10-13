@@ -30,8 +30,14 @@ class Settings(BaseSettings):
     cookie_secret: str
     token_encryption_key: str
 
-    # Where Repository Service lives — used to fire the ingest trigger.
-    repository_service_base_url: str
+    # SQS (decision 057). Endpoint and keys are set only for LocalStack;
+    # on AWS they stay unset and the task's IAM role is used.
+    aws_region: str = "us-east-1"
+    aws_endpoint_url: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    ingestion_jobs_queue_url: str
+
     # Where Evaluation Service lives — report trigger and reads (decision 049).
     evaluation_service_base_url: str
 
