@@ -32,7 +32,7 @@ def pipeline(monkeypatch):
         calls.stored[repository_id] = IngestionJob(job.repository_id, job.github_url, status)
 
     class FakeClient:
-        async def emit_event(self, repository_id, event, data=None):
+        async def emit_event(self, repository_id, event, *, error_message=None):
             calls.events.append(event)
 
     async def fake_ingest(_job):
@@ -43,7 +43,7 @@ def pipeline(monkeypatch):
     monkeypatch.setattr(jobs, "set_status", fake_set_status)
     monkeypatch.setattr(orchestrator, "get_db_pool", lambda: None)
     monkeypatch.setattr(worker, "get_db_pool", lambda: None)
-    monkeypatch.setattr(orchestrator, "get_core_api_client", lambda: FakeClient())
+    monkeypatch.setattr(orchestrator, "get_event_publisher", lambda: FakeClient())
     monkeypatch.setattr(
         orchestrator, "get_settings", lambda: SimpleNamespace(workspace_root=Path("/unused")),
     )

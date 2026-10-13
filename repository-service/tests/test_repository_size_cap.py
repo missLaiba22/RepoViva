@@ -70,8 +70,8 @@ async def test_orchestrator_reports_too_large_as_failed(monkeypatch) -> None:
     events: list[tuple] = []
 
     class FakeClient:
-        async def emit_event(self, repository_id, event, data=None):
-            events.append((repository_id, event, data))
+        async def emit_event(self, repository_id, event, *, error_message=None):
+            events.append((repository_id, event, error_message))
 
     class FakeFetchResult:
         clone_path = Path("/unused")
@@ -83,7 +83,7 @@ async def test_orchestrator_reports_too_large_as_failed(monkeypatch) -> None:
     async def fake_run_indexing(**_kwargs):
         raise RepositoryTooLargeError(7_169, 6_000)
 
-    monkeypatch.setattr(orchestrator, "get_core_api_client", lambda: FakeClient())
+    monkeypatch.setattr(orchestrator, "get_event_publisher", lambda: FakeClient())
     monkeypatch.setattr(orchestrator, "fetch_repository", fake_fetch)
     monkeypatch.setattr(orchestrator, "run_indexing", fake_run_indexing)
     monkeypatch.setattr(orchestrator, "get_db_pool", lambda: None)
@@ -103,6 +103,5 @@ async def test_orchestrator_reports_too_large_as_failed(monkeypatch) -> None:
     await orchestrator.run_ingestion("14")
 
     assert events[-1] == (
-        "14", "ingestion.failed",
-        {"error_message": "repository too large: 7,169 chunks (limit 6,000)"},
+        "14", "ingestion.failed", "repository too large: 7,169 chunks (limit 6,000)",
     )

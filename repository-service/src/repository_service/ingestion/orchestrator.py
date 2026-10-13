@@ -1,7 +1,7 @@
 """Runs the ingestion pipeline for a repository.
 
 Called by the worker for each `ingestion.requested` job (decision 057).
-Emits status events to Core API at each stage boundary (decision 026).
+Publishes status events at each stage boundary (decisions 026, 057).
 Pipeline errors are caught and reported as `ingestion.failed`; only a crash
 leaves the job `in_progress`, so the redelivered message reruns it.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from repository_service.clients.core_api import get_core_api_client
+from repository_service.clients.events import get_event_publisher
 from repository_service.config import get_settings
 from repository_service.db import get_db_pool
 from repository_service.indexing import RepositoryTooLargeError, run_indexing
@@ -36,20 +36,18 @@ async def run_ingestion(repository_id: str) -> None:
     logger.info(
         "ingestion started: repository_id=%s github_url=%s", repository_id, job.github_url,
     )
-    client = get_core_api_client()
-    await client.emit_event(repository_id, "ingestion.started")
+    events = get_event_publisher()
+    await events.emit_event(repository_id, "ingestion.started")
 
     error_message = await _ingest(job)
 
     if error_message is None:
         await jobs.set_status(pool, repository_id, JobStatus.READY)
-        await client.emit_event(repository_id, "ingestion.completed")
+        await events.emit_event(repository_id, "ingestion.completed")
         logger.info("ingestion completed: repository_id=%s", repository_id)
     else:
         await jobs.set_status(pool, repository_id, JobStatus.FAILED)
-        await client.emit_event(
-            repository_id, "ingestion.failed", data={"error_message": error_message},
-        )
+        await events.emit_event(repository_id, "ingestion.failed", error_message=error_message)
 
 
 async def _ingest(job: IngestionJob) -> str | None:

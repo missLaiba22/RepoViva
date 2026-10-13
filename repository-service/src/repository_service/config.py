@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     )
 
     env: str
-    core_api_base_url: str
     internal_hmac_secret: str
 
     # Where cloned repositories live on disk during and after ingestion.
@@ -28,13 +27,14 @@ class Settings(BaseSettings):
     database_url: str
     voyage_api_key: SecretStr
 
-    # SQS (decision 057). Endpoint and keys are set only for LocalStack;
+    # SQS and EventBridge (decision 057). Endpoint and keys are set only for LocalStack;
     # on AWS they stay unset and the task's IAM role is used.
     aws_region: str = "us-east-1"
     aws_endpoint_url: str | None = None
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
     ingestion_jobs_queue_url: str
+    event_bus_name: str = "repoviva"
 
 
 @lru_cache
