@@ -47,7 +47,10 @@ class Planner:
         api_key: str,
         completion: Completion = litellm.acompletion,
         temperature: float = 0.7,
-        max_tokens: int = 2000,
+        # Six questions take about 500 output tokens. Groq's free tier allows
+        # 1,000 output tokens per minute for the planner model, and rejects a
+        # request whose max_tokens alone exceeds what is left.
+        max_tokens: int = 800,
     ) -> None:
         self._model = model
         self._api_key = api_key
@@ -74,7 +77,10 @@ class Planner:
         )
         usage = getattr(response, "usage", None)
         # Decision 052: measure the planning call against the ~5,000 estimate.
-        logger.info("plan call used %s tokens", getattr(usage, "total_tokens", "?"))
+        logger.info(
+            "plan call used %s tokens (%s output)",
+            getattr(usage, "total_tokens", "?"), getattr(usage, "completion_tokens", "?"),
+        )
         return parse_plan(response.choices[0].message.content or "", areas)
 
 
