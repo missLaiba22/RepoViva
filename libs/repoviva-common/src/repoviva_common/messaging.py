@@ -1,4 +1,4 @@
-"""SQS jobs and the worker loop (decision 057).
+"""SQS jobs, EventBridge events and the worker loop (decision 057).
 
 The only module that imports boto3. boto3 is sync: Core API calls it
 directly, async services through `asyncio.to_thread`.
@@ -41,37 +41,46 @@ class MessagingError(Exception):
 Handler = Callable[[Message], Awaitable[None]]
 
 _sqs: Any = None
+_events: Any = None
 
 
-def open_sqs_client(
+def open_messaging(
     *,
     region: str,
     endpoint_url: str | None = None,
     access_key_id: str | None = None,
     secret_access_key: str | None = None,
 ) -> None:
-    """Open the process's SQS client. Keys are None on AWS (the task's IAM role)."""
-    global _sqs
-    _sqs = boto3.client(
-        "sqs",
-        region_name=region,
-        endpoint_url=endpoint_url,
-        aws_access_key_id=access_key_id,
-        aws_secret_access_key=secret_access_key,
-    )
+    """Open the process's SQS and EventBridge clients. Keys are None on AWS (IAM role)."""
+    global _sqs, _events
+    options = {
+        "region_name": region,
+        "endpoint_url": endpoint_url,
+        "aws_access_key_id": access_key_id,
+        "aws_secret_access_key": secret_access_key,
+    }
+    _sqs = boto3.client("sqs", **options)
+    _events = boto3.client("events", **options)
 
 
-def close_sqs_client() -> None:
-    global _sqs
-    if _sqs is not None:
-        _sqs.close()
-        _sqs = None
+def close_messaging() -> None:
+    global _sqs, _events
+    for client in (_sqs, _events):
+        if client is not None:
+            client.close()
+    _sqs = _events = None
 
 
 def get_sqs_client() -> Any:
     if _sqs is None:
-        raise RuntimeError("SQS client not opened — check the lifespan or worker startup")
+        raise RuntimeError("messaging not opened — check the lifespan or worker startup")
     return _sqs
+
+
+def get_events_client() -> Any:
+    if _events is None:
+        raise RuntimeError("messaging not opened — check the lifespan or worker startup")
+    return _events
 
 
 def build_message(type: str, data: dict[str, Any], *, request_id: str | None = None) -> Message:
@@ -90,6 +99,26 @@ def send_job(queue_url: str, type: str, data: dict[str, Any]) -> Message:
         get_sqs_client().send_message(QueueUrl=queue_url, MessageBody=message.model_dump_json())
     except (BotoCoreError, ClientError) as exc:
         raise MessagingError(f"could not send {type}: {exc}") from exc
+    return message
+
+
+def publish_event(bus_name: str, source: str, type: str, data: dict[str, Any]) -> Message:
+    """Put an event on the bus. Each consumer's rule delivers the envelope (the
+    event's `detail`) to its own SQS queue, so workers see jobs and events alike."""
+    message = build_message(type, data)
+    try:
+        response = get_events_client().put_events(
+            Entries=[{
+                "EventBusName": bus_name,
+                "Source": source,
+                "DetailType": type,
+                "Detail": message.model_dump_json(),
+            }]
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise MessagingError(f"could not publish {type}: {exc}") from exc
+    if response.get("FailedEntryCount"):
+        raise MessagingError(f"could not publish {type}: {response['Entries'][0]}")
     return message
 
 

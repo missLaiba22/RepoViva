@@ -20,12 +20,12 @@ services:
     volumes:
       - repoviva_mongo_data:/data/db
 
-  # SQS locally (decision 057); same code path as AWS, only AWS_ENDPOINT_URL differs.
+  # SQS and EventBridge locally (decision 057); same code path as AWS, only AWS_ENDPOINT_URL differs.
   localstack:
     image: localstack/localstack:4.9
     container_name: repoviva-localstack
     environment:
-      SERVICES: sqs
+      SERVICES: sqs,events
     ports:
       - "4566:4566"
     volumes:

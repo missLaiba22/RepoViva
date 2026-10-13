@@ -12,7 +12,7 @@ import signal
 
 from pydantic import BaseModel
 from repoviva_common.http import close_async_client, open_async_client
-from repoviva_common.messaging import Message, close_sqs_client, open_sqs_client, run_worker
+from repoviva_common.messaging import Message, close_messaging, open_messaging, run_worker
 
 from repository_service.config import export_provider_keys, get_settings
 from repository_service.db import apply_schema, close_pool, get_db_pool, init_pool
@@ -42,7 +42,7 @@ async def main() -> None:
     await init_pool()
     await apply_schema()
     open_async_client()
-    open_sqs_client(
+    open_messaging(
         region=settings.aws_region,
         endpoint_url=settings.aws_endpoint_url,
         access_key_id=settings.aws_access_key_id,
@@ -58,7 +58,7 @@ async def main() -> None:
     try:
         await run_worker({settings.ingestion_jobs_queue_url: handle_ingestion_job}, stop=stop)
     finally:
-        close_sqs_client()
+        close_messaging()
         await close_async_client()
         await close_pool()
 
