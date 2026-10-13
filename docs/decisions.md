@@ -2715,7 +2715,7 @@ these.
 
 ## 057 — Queues for jobs, events for facts; HTTP only for queries (AWS SQS + EventBridge)
 
-*Status: decided 2026-10-13. Ingestion jobs implemented 2026-10-13; `interview.ended`, `report-jobs` and `planning-jobs` 2026-10-14; ingestion events not yet.*
+*Status: decided 2026-10-13; implemented 2026-10-13–14 (all jobs and events, with LocalStack). AWS deployment (IAM, ECS workers, alarms) is not yet built.*
 
 **Decision:**
 Every inter-service interaction is sorted by one question: **does the

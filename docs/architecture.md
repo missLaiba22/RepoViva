@@ -2,7 +2,7 @@
 
 ## Overview
 
-RepoViva is built as **4 microservices** communicating over HTTP (and WebSocket for the interview session). Requirements, core entities, service split, and key architectural constraints have been decided. The speech providers are chosen: Groq for question generation (decision 038) and STT (decision 043), Deepgram for TTS (decision 044). The full data model is still open.
+RepoViva is built as **4 microservices**. Queries go over HMAC-signed HTTP, jobs over SQS, and events over an EventBridge bus (decision 057); the interview session uses a WebSocket. Requirements, core entities, service split, and key architectural constraints have been decided. The speech providers are chosen: Groq for question generation (decision 038) and STT (decision 043), Deepgram for TTS (decision 044). The full data model is still open.
 
 This document is the source of truth for the current architecture. See `decisions.md` for the reasoning behind each choice.
 
@@ -33,13 +33,18 @@ flowchart TB
     FE -- REST --> CORE
     FE -- WebSocket --> VOICE
 
-    CORE -- trigger ingest --> REPO
-    REPO -- status callback --> CORE
-    CORE -- trigger report<br/>read report --> EVAL
+    CORE -. ingestion job .-> REPO
+    REPO -. ingestion.* events .-> CORE
+    CORE -. plan job .-> VOICE
+    CORE -- plan status --> VOICE
+    VOICE -. interview.ended .-> CORE
+    VOICE -. interview.ended .-> EVAL
+    CORE -. report job (recovery, retry) .-> EVAL
+    CORE -- read report --> EVAL
     EVAL -- fetch turns --> VOICE
     EVAL -- fetch chunks by id --> REPO
-    VOICE -- retrieval query --> REPO
-    VOICE -- consume token<br/>end-of-session event --> CORE
+    VOICE -- areas, retrieval --> REPO
+    VOICE -- consume token --> CORE
 
     CORE --> DB
     REPO --> DB
@@ -55,7 +60,7 @@ flowchart TB
     EVAL -- grade --> LLM
 ```
 
-*All arrows are implemented. Report generation (Evaluation Service) was added on 2026-10-08, decisions 049–051.*
+*Solid arrows are HMAC-signed HTTP queries. Dotted arrows go through SQS: jobs straight to the worker's queue, events through the EventBridge bus `repoviva` into one queue per consumer (decision 057). All arrows are implemented.*
 
 ## Components
 
@@ -71,9 +76,12 @@ Main REST entry point for the frontend. Owns:
 
 Delegates:
 
-- Ingestion trigger → Repository Service
-- Report generation trigger → Evaluation Service
+- Ingestion → Repository Service (an `ingestion-jobs` job)
+- Question planning → Voice Service (a `planning-jobs` job)
+- Report recovery and retry → Evaluation Service (a `report-jobs` job; the normal path is Evaluation consuming `interview.ended`)
 - Live interview session (WebSocket) → Voice Service
+
+Runs an API and a worker. The worker consumes `interview.ended` and `ingestion.*` events to update interview and repository status.
 
 ### Repository Service
 
@@ -83,9 +91,9 @@ Owns everything about a repository's code and its searchable representation:
 - Parses, chunks, and embeds source code
 - Persists chunks + embeddings (pgvector) to the shared database
 - Exposes a retrieval endpoint used by Voice Service during interviews
-- Reports ingestion progress to Core API via HMAC-signed callbacks (decision 029)
+- Publishes ingestion progress as `ingestion.*` events, which Core API consumes (decisions 029, 057)
 
-Runs ingestion asynchronously (long-running work; must not block API requests). See "Data Flow" below.
+Runs ingestion in a worker that consumes `ingestion-jobs`, separate from its API process. See "Data Flow" below.
 
 ### Voice Service
 
@@ -94,13 +102,14 @@ Owns the live interview session:
 - Terminates the WebSocket from the frontend and admits it by consuming the session token through Core API (decision 035)
 - Runs each turn: Repository Service lookup → LLM → TTS streamed to the client, then the candidate's audio → STT (decisions 043–045)
 - Persists each turn in its own `turns` table: the question when it's asked, the answer when it arrives (decision 040)
-- Reports the end of each session to Core API as `completed` or `interrupted` (decision 041). An interruption still leaves a partial record because turns are already persisted
+- Publishes `interview.ended` with outcome `completed` or `interrupted` when a session ends (decisions 041, 057). An interruption still leaves a partial record because turns are already persisted
+- Plans each interview's questions in a worker that consumes `planning-jobs` (decision 052)
 
 ### Evaluation Service
 
 Generates the end-of-interview report (decisions 049–051):
 
-- Triggered by Core API when an interview ends, `completed` or `interrupted`. Generation runs in the background
+- Its worker consumes `interview.ended` (`completed` or `interrupted`) and Core API's `report.requested` jobs for recovery and retry (decision 057)
 - Fetches the turns from Voice Service and the exact code chunks each question came from (`retrieved_chunk_ids`) from Repository Service, over HMAC-signed HTTP
 - Grades each answered turn in its own LLM call: correctness and clarity on 1–5, strengths, gaps, and 2–4 key points of a strong answer, each citing the turn's chunks. Citations are checked in code (decision 050)
 - Writes a summary. Averages are computed in code, the prose by one more LLM call
@@ -147,51 +156,68 @@ Interviews
 POST /v1/interviews              body: { repository_id }  → Interview + session token   [implemented]
                                  201; 404 if repo missing or not yours; 409 if repo not `ready`
                                  The raw token appears ONLY in this response (decision 035)
+                                 Also sends the `plan.requested` job (decisions 052, 057)
 GET  /v1/interviews              list current user's interviews, newest first            [implemented]
 GET  /v1/interviews/{id}         single interview; 404 if missing or not yours           [implemented]
+GET  /v1/interviews/{id}/plan    question plan status, proxied from Voice Service;        [implemented]
+                                 re-sends the job if Voice has none and the interview
+                                 is `created`; 503 if Voice is down
+POST /v1/interviews/{id}/plan/retry                                                      [implemented]
+                                 re-sends the job for a missing or retryably failed plan;
+                                 other plans are returned as is; 409 once started
 GET  /v1/interviews/{id}/report  the report: 200 ready/failed, 202 generating,          [implemented]
                                  404 if missing, not yours or not ended (decision 049)
 POST /v1/interviews/{id}/report/retry                                                    [implemented]
-                                 re-sends the trigger for a failed or missing report: 202;
-                                 a ready report is returned as is (200); 404 as above
+                                 re-sends the job for a failed or missing report: 202;
+                                 a ready (200) or generating (202) report is returned
+                                 as is; 404 as above
 ```
 
 The current user is always derived from the auth token, never from request bodies.
 
 ### Internal service-to-service APIs
 
-These are called only by other services, never exposed to the frontend. All internal calls are authenticated with HMAC-SHA256 (see decision 027).
+These are called only by other services, never exposed to the frontend. HTTP calls are queries, authenticated with HMAC-SHA256 (decision 027). Everything a caller doesn't wait for goes through SQS (decision 057, below).
 
-**Implemented (slice 2 step 4):**
+**Jobs and events (decision 057).**
 
-Core API → Repository Service (ingestion trigger)
+Every message, job or event, is the same envelope:
 ```
-POST /internal/v1/repositories/{repository_id}/ingest
-body: { github_url: string }
-→ 202 Accepted (fire-and-forget from Core API's perspective)
-→ 401 Unauthorized (missing or invalid HMAC signature)
-```
-
-**Implemented (slice 3):**
-
-Repository Service → Core API (status callback)
-```
-POST /internal/v1/repositories/{repository_id}/events
-Headers: X-Repoviva-Timestamp, X-Repoviva-Signature (HMAC-SHA256)
-body: {
-  event_id:    <uuid v4>,
-  event_type:  "ingestion.started" | "ingestion.completed" | "ingestion.failed",
-  occurred_at: <ISO 8601 timestamp, UTC>,
-  data:        { error_message?: string, ... }   // shape depends on event_type
-}
-→ 202 Accepted — event received and state transition applied
-→ 401 Unauthorized — missing or invalid HMAC signature
-→ 404 Not Found — unknown repository_id
-→ 422 Unprocessable Entity — illegal state transition (target row is
-  in a terminal state: ready or failed)
+{ message_id: <uuid>, type: string, occurred_at: <ISO 8601 UTC>,
+  request_id: string | null,   // decision 056; null until it ships
+  data: { ... } }              // the contract: a Pydantic model on each side
 ```
 
-Deduplication by event_id is not implemented for MVP — see decision 029.
+Jobs (one consumer; sent straight to the worker's queue)
+```
+ingestion-jobs   ingestion.requested  { repository_id, github_url }               Core API → Repository Service
+planning-jobs    plan.requested       { interview_id, repository_id }             Core API → Voice Service
+report-jobs      report.requested     { interview_id, repository_id, outcome }    Core API → Evaluation Service
+```
+
+Events (published on the EventBridge bus `repoviva`; one rule per consumer
+routes the event's `detail`, which is the envelope, into its own queue)
+```
+interview.ended      { interview_id, repository_id, outcome, error_message }
+                     source repoviva.voice-service
+                     → core-interview-events (Core API: interview status)
+                     → evaluation-interview-events (Evaluation: report)
+ingestion.started | ingestion.completed | ingestion.failed
+                     { repository_id, error_message }
+                     source repoviva.repository-service
+                     → core-ingestion-events (Core API: repository status)
+```
+
+Each service runs a worker (`python -m <package>.worker`) from the same
+image as its API. The worker long-polls its queues, runs one message at a
+time per queue, and deletes a message only after its handler returns. A
+heartbeat extends the visibility timeout while a long job runs. Every
+queue has a DLQ (`maxReceiveCount` = 3). Jobs claim their stored state,
+then run unless it is terminal, so a duplicate does nothing and a message
+redelivered after a crash finishes the work. Event consumers treat a
+rejected state transition (late or duplicate event) as handled. Publishing
+is retried with backoff. `repoviva_common/messaging.py` is the only code
+that touches SQS and EventBridge (`boto3`).
 
 **Implemented (retrieval endpoint):**
 
@@ -211,8 +237,8 @@ body: {
 → 502 Bad Gateway (embedding provider call failed)
 ```
 Always 200 with `chunks: []` if nothing matches — Repository Service has
-no local record of ingestion status (that lives in Core API, reached only
-via outbound callbacks, never queried back), so it cannot distinguish
+no local record of the user-visible ingestion status (that lives in Core
+API, reached only through events, never queried back), so it cannot distinguish
 "unknown repository_id" from "ingestion still running" from "done." Core
 API already gates `POST /v1/interviews` on repo status `ready`, so by the
 time this endpoint is called ingestion is expected to be complete. See
@@ -240,30 +266,10 @@ interview to `active` (decision 036), so concurrent calls with the same
 token can't both succeed. The endpoint is not idempotent: a second call
 gets 403 `consumed`. Implementation notes are under decision 035.
 
-**Implemented (decisions 036, 041):**
-
-Voice Service → Core API (end of session)
-```
-POST /internal/v1/interviews/{interview_id}/events
-body: { event_id, event_type: "interview.completed" | "interview.interrupted",
-        occurred_at, data: { error_message? } }
-→ 202  → 401  → 404  → 422 (illegal transition)
-```
-Strict transitions: only an `active` interview can end, so a repeated end
-event gets 422. Sets `ended_at`, plus `error_message` (truncated to 1000
-characters) on `interrupted`. Voice Service sends it best-effort, with no
-retry, like ingestion events.
-
 **Implemented (decision 049).** Decision 049 has the full contract and recovery rules.
 
-Core API → Evaluation Service (report trigger and read)
+Core API → Evaluation Service (report read)
 ```
-POST /internal/v1/reports
-body: { interview_id, repository_id, outcome: "completed" | "interrupted" }
-→ 202 { interview_id, status, scheduled }
-       (no-op if the report is ready or generating; regenerates a failed one;
-        `scheduled` says whether a new run started)
-
 GET  /internal/v1/reports/{interview_id}
 → 200 { status: "generating" | "ready" | "failed", partial, summary,
         turn_evaluations, model, prompt_version, error_message }
@@ -283,7 +289,7 @@ body: { ids: int[] }   // 1–200
 → 200 { chunks: [ { id, content, filename, start_line, end_line, language } ] }
 ```
 
-**Implemented (decision 052; no caller yet).**
+**Implemented (decision 052).**
 
 Voice Service → Repository Service (areas, for question planning)
 ```
@@ -361,43 +367,30 @@ or the session failed mid-way, including an STT or TTS provider error).
 
 ## Data Flow
 
-### Repository ingestion (current state — slice 3 step 1)
-
-Ingestion is triggered synchronously and runs asynchronously inside
-Repository Service. Status is reported back to Core API via HMAC-signed
-HTTP callbacks (decisions 024–026, 029).
+### Repository ingestion (decisions 029, 057)
 
 1. User submits a GitHub URL via `POST /v1/repositories` (Core API).
-2. Core API validates the URL, creates a Repository row with status
-   `queued`, and calls Repository Service's
-   `POST /internal/v1/repositories/{id}/ingest` (HMAC-signed) with the
-   GitHub URL in the body.
-3. Repository Service verifies the HMAC signature and returns
-   `202 Accepted` immediately. It schedules `run_ingestion` on
-   FastAPI's `BackgroundTasks` and returns; the pipeline runs after
-   the response is sent.
-4. If the trigger call fails at step 2 (network error, timeout, non-2xx
-   response), Core API marks the just-created row `failed` immediately
-   with an `error_message` describing the failure, and returns 201 with
-   that row. The user sees the row as `failed` right away.
-5. Core API returns the created (or immediately-failed) Repository row
-   to the client with a 201 response.
-6. Repository Service's background pipeline runs: emit
-   `ingestion.started` → shallow-clone the repo into
-   `workspace/<repository_id>/` → walk, chunk, and embed the source
-   tree via a per-repository CocoIndex App (decision 031), writing
-   rows to the shared `code_chunks` table → emit `ingestion.completed`
-   (or `ingestion.failed` with the fetch or indexing error). Each
-   callback is an HMAC-signed `POST /internal/v1/repositories/{id}/events`
-   on Core API.
-7. Core API applies the loose state machine on each event (decision 029):
-   `queued`/`in_progress` transitions to `in_progress`/`ready`/`failed`
-   as dictated by the event; terminal states reject further events
-   with 422.
-8. Client polls `GET /v1/repositories/{id}` to observe the current
-   status. States progress `queued → in_progress → ready` for
-   successful ingestions, or `queued → in_progress → failed`
-   (with `error_message` populated) for failed ones.
+2. Core API creates a Repository row with status `queued` and sends an
+   `ingestion.requested` job `{ repository_id, github_url }` on
+   `ingestion-jobs`. If the send fails, it marks the row `failed` with
+   an `error_message` right away. Either way it returns 201 with the row.
+3. Repository Service's worker receives the job, claims an
+   `ingestion_jobs` row, and runs `run_ingestion(repository_id)` unless
+   that row is already `ready` or `failed`.
+4. The pipeline publishes `ingestion.started` → shallow-clones the repo
+   into `workspace/<repository_id>/` → walks, chunks, and embeds the
+   source tree via a per-repository CocoIndex App (decision 031), writing
+   rows to the shared `code_chunks` table → publishes
+   `ingestion.completed` (or `ingestion.failed` with the fetch or
+   indexing error). Pipeline errors end as `failed`; only a crash leaves
+   the job `in_progress`, and SQS redelivers it.
+5. Core API's worker applies the loose state machine on each event
+   (decision 029): `queued`/`in_progress` move to
+   `in_progress`/`ready`/`failed`; terminal states reject further events,
+   which the worker treats as handled.
+6. Client polls `GET /v1/repositories/{id}` to observe the current
+   status: `queued → in_progress → ready`, or `→ failed` with
+   `error_message`.
 
 Chunking uses CocoIndex's syntax-aware `RecursiveSplitter`; embedding
 is Voyage `voyage-4-lite` via CocoIndex's LiteLLM integration
@@ -413,19 +406,19 @@ see decision 031 for why that split exists and what it fixed.
 4. **Opening turn:** retrieve with the fixed seed query (decision 042) → generate the question with Groq (decisions 034, 038) → insert the turn as `asked` → send `question.text` → stream the question's audio from Deepgram as binary frames, then `question.audio_end` (decision 044).
 5. The user answers. The client streams microphone audio as binary frames and sends `audio.end` when the user stops. Voice Service compresses the buffered audio to MP3 (decision 047) and transcribes it with Groq Whisper, using the question as prompt (decision 043), sends `transcript.final`, records the answer (turn → `answered`) and sends `turn.complete`. Silence or an over-long answer gets an `error` and the turn waits for another try.
 6. **Follow-up turns:** retrieve with the previous question plus the answer, excluding every chunk already used → generate with the full history → ask. Repeat until `MAX_QUESTIONS` (default 6) or the client sends `session.end`.
-7. On session end, Voice Service reports `interview.completed` (budget reached or user stopped) or `interview.interrupted` (disconnect or error) to Core API (decisions 036, 041). Core API then triggers the report (see below).
+7. On session end, Voice Service publishes `interview.ended` with outcome `completed` (budget reached or user stopped) or `interrupted` (disconnect or error) (decisions 036, 041, 057). Core API's worker ends the interview and Evaluation's worker starts the report (see below).
 
 Each turn's `timings` records `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tts_ms` and `stt_ms`, and the same values are logged. Together they cover decision 006's latency path, from the end of the user's speech (STT) to the next question's audio starting (retrieval, LLM, TTS first byte).
 
 ### Report generation (decisions 049–051)
 
-1. Core API applies the end event, answers Voice Service, then sends `POST /internal/v1/reports` to Evaluation Service in the background. Best-effort, no retry.
-2. Evaluation Service upserts the `reports` row as `generating`, returns 202, and runs the pipeline in the background.
+1. Evaluation Service's worker receives `interview.ended` from its own queue (decision 057).
+2. It claims the `reports` row (new, or a `failed` one restarted) and generates the report unless it is already `ready`.
 3. It fetches the turns from Voice Service and their chunks from Repository Service.
 4. It grades each answered turn with `gpt-oss-120b` on Groq, one call at a time with back-off on 429, then writes the summary. Status becomes `ready`, or `failed` with `error_message`.
 5. The client polls `GET /v1/interviews/{id}/report` on Core API, which checks ownership and proxies to Evaluation Service. Evaluation's `error_message` is not passed on to the client.
 
-Recovery: if the trigger was lost, the first read gets a 404 from Evaluation, so Core API re-sends the trigger and answers 202. On startup, Evaluation resumes every report still `generating`.
+Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row still `generating` reruns. If the event never arrived, the first read gets a 404 from Evaluation, so Core API sends a `report.requested` job and answers 202. The user's retry sends the same job for a `failed` report.
 
 ## Data Storage
 
@@ -434,7 +427,9 @@ Recovery: if the trigger was lost, the first read gets a 404 from Evaluation, so
     interviews, encrypted OAuth tokens. No report data (decision 049).
     *A table for processed inbound event IDs may be added later
     if decision 029 is revisited and dedup becomes necessary.*
-  - Repository Service schema: `code_chunks` (chunk text + Voyage
+  - Repository Service schema: `ingestion_jobs` (one row per repository:
+    `github_url` and the job's own `status`, so a redelivered job can
+    check it, decision 057) and `code_chunks` (chunk text + Voyage
     embeddings, one row per code chunk, primary key
     `(repository_id, id)` — see decision 031). *Currently created in
     the default `public` schema, not a dedicated per-service schema
@@ -467,9 +462,10 @@ Recovery: if the trigger was lost, the first read gets a 404 from Evaluation, so
 - OAuth tokens are encrypted at the application layer (Core API). Everything else relies on disk-level encryption.
 - Shared database across services with strict per-service table ownership (see decision 021).
 - No API gateway — frontend calls Core API and Voice Service directly (see decision 022).
+- Inter-service jobs and events go through SQS and EventBridge (decision 057). Locally, LocalStack runs both (`docker compose up -d`; `infra/localstack/init-queues.sh` creates the bus, rules, queues and DLQs). On AWS, IAM task roles replace HMAC on these paths.
 - Internal service-to-service HTTP calls are authenticated with HMAC-SHA256 over `timestamp + "." + body`, with a 60-second freshness window and a single shared secret (see decision 027). All services use the shared `libs/repoviva-common` package for signing, verification and the `verify_hmac` dependency (decision 054); it holds infrastructure only, never domain code.
 - Each service makes all outbound HTTP calls through one long-lived httpx client opened in its lifespan (decision 055): `AsyncClient` in the async services, `Client` in Core API, whose routes are sync.
-- Ingestion status *is* observable end-to-end (decision 029, superseding decision 028): Repository Service emits HMAC-signed `ingestion.started`/`ingestion.completed`/`ingestion.failed` callbacks to Core API as the real pipeline runs, and Core API applies a loose state machine and exposes the current state via `GET /v1/repositories/{id}`. Callback delivery is not retried and events are not deduplicated — a callback dropped by network failure leaves the row in whatever state it was last set to, visible to the user as a stuck `queued`/`in_progress` until a later event (if any) corrects it. See decision 029's tradeoffs and revisit triggers.
+- Ingestion status is observable end to end (decisions 029, 057): Repository Service publishes `ingestion.started`/`completed`/`failed`, Core API's worker applies a loose state machine, and `GET /v1/repositories/{id}` shows the current state. Events are retried by SQS and land eventually; they are not deduplicated by `message_id`, because every consumer is idempotent without it. A job that crashes on every attempt ends in the DLQ while the row still shows `in_progress`.
 - Core API's Alembic autogenerate manages only tables with a Core API model (`include_object` hook, decision 037); other services' tables in the shared database are invisible to it.
 
 ## Decided, not yet implemented
@@ -479,9 +475,9 @@ are decided but not built. When each one ships, move it into the sections
 above and delete it here.
 
 **Pre-generated question plan (decision 052, supersedes 034).**
-- `POST /v1/interviews` makes Core API send a `plan.requested` job on SQS
-  `planning-jobs` (decision 057); Voice Service's worker plans. If the send
-  fails, the plan-status read re-sends it when Voice has no plan.
+- Built: Core API sends the `plan.requested` job on `POST /v1/interviews`
+  and proxies the plan status and retry; Voice Service's worker plans
+  (decision 057, see API Surface). Not built: the live page below.
 - Voice Service gets the repository's areas (directories with chunk counts)
   from a new Repository Service endpoint,
   `GET /internal/v1/repositories/{id}/areas` (built, see above). It retrieves 2 chunks per area,
@@ -524,27 +520,6 @@ above and delete it here.
   first time.
 - One Voice WebSocket connection is one interview, so a single ID follows
   an interview through all four services.
-
-**Queues for jobs, events for facts (decision 057, amends 028, 029, 036, 049, 052).**
-- Rule: queries stay HMAC-signed HTTP; jobs go on SQS; events go on the
-  EventBridge bus `repoviva`, routed to one SQS queue per consumer. Every
-  queue has a DLQ.
-- Jobs: `ingestion-jobs` (Core API → Repository Service),
-  `planning-jobs` (Core API → Voice Service) and `report-jobs` (Core API →
-  Evaluation, recovery and retry only) replace the HTTP triggers;
-  `POST /internal/v1/reports` is removed.
-- Events: `interview.ended` (Voice) is consumed by Core API (status) and
-  Evaluation (report), so Core no longer triggers reports on the normal path.
-  `ingestion.*` (Repository Service) is consumed by Core API.
-- Each service runs an API and a worker from the same image; workers call
-  the existing job functions. Jobs rerun unless the stored status is
-  terminal, so a redelivered message after a crash finishes the work.
-  Repository Service gets an `ingestion_jobs` table. Startup resume is
-  removed once redelivery covers it.
-- `repoviva_common/messaging.py` wraps `boto3` (send job, publish event,
-  run worker); the message envelope carries the request ID (decision 056).
-  IAM replaces HMAC on queued paths. LocalStack runs SQS and EventBridge
-  locally.
 
 ## Future Evolution
 
