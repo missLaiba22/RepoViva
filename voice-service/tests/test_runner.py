@@ -56,15 +56,22 @@ class FakeSocket:
 class FakeCore:
     def __init__(self, consume_result=SESSION):
         self._consume_result = consume_result
-        self.events: list[tuple[int, str, str | None]] = []
 
     async def consume_token(self, token):
         if isinstance(self._consume_result, Exception):
             raise self._consume_result
         return self._consume_result
 
-    async def send_interview_event(self, interview_id, event_type, *, error_message=None):
-        self.events.append((interview_id, event_type, error_message))
+
+
+class FakeEvents:
+    def __init__(self):
+        self.events: list[tuple[int, str, str | None]] = []
+        self.repository_ids: list[int] = []
+
+    async def interview_ended(self, *, interview_id, repository_id, outcome, error_message=None):
+        self.events.append((interview_id, outcome, error_message))
+        self.repository_ids.append(repository_id)
 
 
 class FakeTranscriber:
@@ -123,12 +130,14 @@ def make(core=None, transcriber=None, synthesizer=None, plan=..., timeout=1.0,
          max_answer_seconds=180):
     parts = {
         "core": core or FakeCore(),
+        "events": FakeEvents(),
         "transcriber": transcriber or FakeTranscriber(),
         "synthesizer": synthesizer or FakeSynthesizer(),
         "sessions": FakeSessions(planned(2) if plan is ... else plan),
     }
     session = InterviewSession(
         core_api=parts["core"],
+        events=parts["events"],
         transcriber=parts["transcriber"],
         synthesizer=parts["synthesizer"],
         sessions=parts["sessions"],
@@ -163,7 +172,8 @@ async def test_full_interview_plays_the_plan_in_order():
     assert [m["text"] for m in ws.sent if m["type"] == "question.text"] == ["Q1?", "Q2?"]
     assert ws.sent[-1]["reason"] == "completed"
     assert ws.closed == (1000, None)
-    assert p["core"].events == [(7, "interview.completed", None)]
+    assert p["events"].events == [(7, "completed", None)]
+    assert p["events"].repository_ids == [15]  # in the event, so Evaluation needn't call back
     assert statuses(p) == [("answered", "first"), ("answered", "second")]
 
 
@@ -187,7 +197,7 @@ async def test_plan_not_ready_is_interrupted_and_closed():
     assert ws.types() == ["error"]
     assert ws.sent[0]["code"] == "plan_not_ready"
     assert ws.closed[0] == 1008
-    assert p["core"].events == [(7, "interview.interrupted", "plan not ready")]
+    assert p["events"].events == [(7, "interrupted", "plan not ready")]
 
 
 async def test_client_session_end_counts_as_completed():
@@ -197,14 +207,14 @@ async def test_client_session_end_counts_as_completed():
     await session.run(ws)
 
     assert ws.sent[-1] == {"type": "session.end", "reason": "ended_by_client"}
-    assert p["core"].events == [(7, "interview.completed", None)]
+    assert p["events"].events == [(7, "completed", None)]
 
 
 async def test_disconnect_mid_interview_is_interrupted():
     session, p = make(plan=planned(5))
     await session.run(FakeSocket(START, answer("a"), DISCONNECT))
 
-    assert p["core"].events == [(7, "interview.interrupted", "client disconnected")]
+    assert p["events"].events == [(7, "interrupted", "client disconnected")]
     # The unanswered question is still on record (decision 008).
     assert statuses(p)[:3] == [("answered", "a"), ("asked", None), ("planned", None)]
 
@@ -221,7 +231,7 @@ async def test_rejected_token_closes_1008_without_event(consume_result):
 
     assert ws.closed == (1008, "session could not be started")
     assert ws.sent == []  # reason never reaches the client
-    assert p["core"].events == []  # never became active
+    assert p["events"].events == []  # never became active
 
 
 async def test_core_api_down_closes_1011():
@@ -231,7 +241,7 @@ async def test_core_api_down_closes_1011():
     await session.run(ws)
 
     assert ws.closed[0] == 1011
-    assert p["core"].events == []
+    assert p["events"].events == []
 
 
 async def test_no_session_start_times_out_with_1008():
@@ -259,7 +269,7 @@ async def test_bad_message_mid_interview_gets_error_and_continues():
     await session.run(ws)
 
     assert "error" in ws.types()
-    assert p["core"].events == [(7, "interview.completed", None)]
+    assert p["events"].events == [(7, "completed", None)]
 
 
 # --- Spoken answers (decisions 043, 045) --------------------------------------
@@ -301,7 +311,7 @@ async def test_silence_gets_no_speech_and_the_turn_waits(first_try, transcripts)
     errors = [m for m in ws.sent if m["type"] == "error"]
     assert [e["code"] for e in errors] == ["no_speech"]
     assert statuses(p) == [("answered", "real answer")]
-    assert p["core"].events == [(7, "interview.completed", None)]
+    assert p["events"].events == [(7, "completed", None)]
 
 
 async def test_over_long_answer_is_dropped_then_retried():
@@ -324,8 +334,8 @@ async def test_stt_failure_is_interrupted():
 
     await session.run(ws)
 
-    (_, event_type, message), = p["core"].events
-    assert event_type == "interview.interrupted"
+    (_, event_type, message), = p["events"].events
+    assert event_type == "interrupted"
     assert "groq 503" in message
     assert ws.closed[0] == 1011
 
@@ -351,8 +361,8 @@ async def test_tts_failure_is_interrupted_with_question_on_record():
 
     await session.run(ws)
 
-    (_, event_type, message), = p["core"].events
-    assert event_type == "interview.interrupted"
+    (_, event_type, message), = p["events"].events
+    assert event_type == "interrupted"
     assert "deepgram 402" in message
     assert ws.closed[0] == 1011
     assert statuses(p)[0] == ("asked", None)

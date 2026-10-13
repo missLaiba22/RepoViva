@@ -1,7 +1,7 @@
-"""Outbound calls to Core API: consume the session token, report the end.
+"""Outbound call to Core API: consume the session token.
 
-Both are HMAC-signed internal calls (decision 027). Bodies are serialized
-once with fixed separators so the signed bytes are the sent bytes.
+HMAC-signed (decision 027). The body is serialized once with fixed
+separators so the signed bytes are the sent bytes.
 """
 
 from __future__ import annotations
@@ -9,9 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any, Literal
-from uuid import uuid4
+from typing import Any
 
 import httpx
 from repoviva_common.hmac_auth import sign
@@ -22,13 +20,10 @@ from voice_service.config import get_settings
 logger = logging.getLogger(__name__)
 
 _CONSUME_PATH = "/internal/v1/session-tokens/consume"
-_EVENTS_PATH = "/internal/v1/interviews/{interview_id}/events"
 
-# Core API's handlers are one DB statement each; anything slower than
-# this means something is wrong, and the user is waiting on the consume.
+# Core API's handler is one DB statement; anything slower than this means
+# something is wrong, and the user is waiting on the consume.
 _TIMEOUT_SECONDS = 5.0
-
-InterviewEventType = Literal["interview.completed", "interview.interrupted"]
 
 
 @dataclass(frozen=True)
@@ -92,35 +87,6 @@ class CoreApiClient:
             user_id=int(data["user_id"]),
             repository_id=int(data["repository_id"]),
         )
-
-    async def send_interview_event(
-        self,
-        interview_id: int,
-        event_type: InterviewEventType,
-        *,
-        error_message: str | None = None,
-    ) -> None:
-        """Report the end of a session (decisions 036, 041).
-
-        Best-effort, like Repository Service's ingestion events: logs and
-        swallows failures. A lost event leaves the interview stuck
-        `active` — the risk decision 036 accepts — but turns are already
-        persisted, so nothing is lost.
-        """
-        body = {
-            "event_id": str(uuid4()),
-            "event_type": event_type,
-            "occurred_at": datetime.now(UTC).isoformat(),
-            "data": {"error_message": error_message} if error_message else None,
-        }
-        try:
-            resp = await self._post(_EVENTS_PATH.format(interview_id=interview_id), body)
-            resp.raise_for_status()
-        except httpx.HTTPError:
-            logger.exception(
-                "failed to send %s for interview %s (event_id=%s)",
-                event_type, interview_id, body["event_id"],
-            )
 
 
 def get_core_api_client() -> CoreApiClient:

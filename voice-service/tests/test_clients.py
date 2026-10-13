@@ -57,33 +57,6 @@ async def test_consume_token_other_errors_are_http_errors():
         await client.consume_token("tok")
 
 
-async def test_interview_event_body_matches_core_api_envelope():
-    captured = {}
-
-    def handler(request):
-        captured["path"] = request.url.path
-        captured["body"] = json.loads(request.content)
-        _assert_signed(request)
-        return httpx.Response(202)
-
-    await _core(handler).send_interview_event(
-        7, "interview.interrupted", error_message="socket closed"
-    )
-    assert captured["path"] == "/internal/v1/interviews/7/events"
-    body = captured["body"]
-    assert body["event_type"] == "interview.interrupted"
-    assert body["data"] == {"error_message": "socket closed"}
-    assert {"event_id", "occurred_at"} <= body.keys()
-
-
-async def test_interview_event_failure_is_swallowed():
-    def handler(request):
-        raise httpx.ConnectError("down")
-
-    # Must not raise: the session is already over.
-    await _core(handler).send_interview_event(7, "interview.completed")
-
-
 def _repo(handler) -> RepositoryClient:
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return RepositoryClient("http://repo.test", _SECRET, http=http)

@@ -2,7 +2,7 @@
 
     session.start ─▶ consume token ─▶ load plan ─▶ [persist ─▶ ask (text + TTS audio)
                        ◀── audio frames ─ audio.end ─▶ STT ─▶ persist] × planned questions
-                    ─▶ end event
+                    ─▶ interview.ended event
 
 The questions were written before the session (decision 052), so a turn
 makes no LLM call and no retrieval.
@@ -63,8 +63,16 @@ class Channel(Protocol):
 
 class CoreApi(Protocol):
     async def consume_token(self, token: str) -> ConsumedSession: ...
-    async def send_interview_event(
-        self, interview_id: int, event_type: str, *, error_message: str | None = None
+
+
+class InterviewEvents(Protocol):
+    async def interview_ended(
+        self,
+        *,
+        interview_id: int,
+        repository_id: int,
+        outcome: Literal["completed", "interrupted"],
+        error_message: str | None = None,
     ) -> None: ...
 
 
@@ -107,12 +115,14 @@ class InterviewSession:
         self,
         *,
         core_api: CoreApi,
+        events: InterviewEvents,
         transcriber: Transcriber,
         synthesizer: Synthesizer,
         sessions: Sessions,
         config: SessionConfig,
     ) -> None:
         self._core = core_api
+        self._events = events
         self._transcriber = transcriber
         self._synthesizer = synthesizer
         self._sessions = sessions
@@ -141,32 +151,37 @@ class InterviewSession:
             logger.warning(
                 "interview %s: session started before its plan was ready", session.interview_id
             )
-            await self._core.send_interview_event(
-                session.interview_id, "interview.interrupted", error_message="plan not ready",
-            )
+            await self._ended(session, "interrupted", "plan not ready")
             await _safe_send(ws, protocol.error("plan_not_ready", "the interview isn't ready yet"))
             await _safe_close(ws, _CLOSE_POLICY_VIOLATION)
             return
         except WebSocketDisconnect:
             logger.info("interview %s: client disconnected", session.interview_id)
-            await self._core.send_interview_event(
-                session.interview_id, "interview.interrupted",
-                error_message="client disconnected",
-            )
+            await self._ended(session, "interrupted", "client disconnected")
             return
         except Exception as exc:
             logger.exception("interview %s failed", session.interview_id)
-            await self._core.send_interview_event(
-                session.interview_id, "interview.interrupted",
-                error_message=f"{type(exc).__name__}: {exc}",
-            )
+            await self._ended(session, "interrupted", f"{type(exc).__name__}: {exc}")
             await _safe_send(ws, protocol.error("internal_error", "the interview hit an error"))
             await _safe_close(ws, _CLOSE_INTERNAL_ERROR)
             return
 
-        await self._core.send_interview_event(session.interview_id, "interview.completed")
+        await self._ended(session, "completed")
         await _safe_send(ws, protocol.session_end(outcome))
         await _safe_close(ws, _CLOSE_NORMAL)
+
+    async def _ended(
+        self,
+        session: ConsumedSession,
+        outcome: Literal["completed", "interrupted"],
+        error_message: str | None = None,
+    ) -> None:
+        await self._events.interview_ended(
+            interview_id=session.interview_id,
+            repository_id=session.repository_id,
+            outcome=outcome,
+            error_message=error_message,
+        )
 
     async def _admit(self, ws: Channel) -> ConsumedSession | None:
         """Wait for session.start and consume its token. None = closed."""

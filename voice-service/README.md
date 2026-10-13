@@ -18,8 +18,8 @@ Plans each interview's questions in advance, then runs the live interview over a
   - Silence gets `no_speech` and an answer over `MAX_ANSWER_SECONDS` gets `answer_too_long`. Either way the question waits for another try. Audio is never stored (decision 009).
 - **Sessions** (decision 053). One MongoDB document per interview in `interview_sessions`: the plan, and on each question its `status` (`planned` → `asked` → `answered`), answer and per-stage timings (`tts_first_byte_ms`, `tts_ms`, `stt_ms`). A question is marked `asked` before it is sent, so an interrupted interview still records it.
 - **Ending** (decision 041):
-  - When the plan is used up, or the client sends `session.end`, Voice Service sends `interview.completed` to Core API.
-  - A disconnect or error (including an STT or TTS failure) sends `interview.interrupted` with an `error_message`.
+  - When the plan is used up, or the client sends `session.end`, Voice Service publishes `interview.ended` with outcome `completed` on the EventBridge bus `repoviva` (decision 057). Core API and Evaluation Service each consume it from their own queue. Publishing is retried with backoff.
+  - A disconnect or error (including an STT or TTS failure) publishes outcome `interrupted` with an `error_message`.
 
 ## Internal endpoints
 
@@ -56,7 +56,8 @@ src/voice_service/
   planning/job.py         the planning job: areas → chunks → plan, with retry
   planning/planner.py     the one LLM call and its validation
   planning/prompts.py     planning prompt
-  session/runner.py       the interview loop (admission → planned questions → end event)
+  session/runner.py       the interview loop (admission → planned questions → interview.ended)
+  clients/events.py       publishes interview.ended
   session/protocol.py     WebSocket message models
   session/store.py        session documents in MongoDB
   clients/core_api.py     consume token, send end-of-session event (HMAC)

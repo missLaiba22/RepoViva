@@ -6,6 +6,7 @@ Thin: accept, wire up collaborators, hand the socket to the runner.
 from fastapi import APIRouter, WebSocket
 
 from voice_service.clients.core_api import get_core_api_client
+from voice_service.clients.events import get_event_publisher
 from voice_service.config import get_settings
 from voice_service.db import get_db
 from voice_service.session.runner import InterviewSession, SessionConfig
@@ -25,6 +26,7 @@ async def interview_socket(ws: WebSocket) -> None:
     settings = get_settings()
     session = InterviewSession(
         core_api=get_core_api_client(),
+        events=get_event_publisher(),
         transcriber=get_transcriber(),
         synthesizer=get_synthesizer(),
         sessions=SessionStore(get_db()),
