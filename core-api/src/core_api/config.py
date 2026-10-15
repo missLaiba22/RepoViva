@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # unused (decision 035). An interview rule, so it lives in config,
     # not in security/session_tokens.py.
     session_token_ttl_minutes: int = 5
+    # An `active` interview consumed longer ago than this is ended on read
+    # (decision 059). Must exceed Voice Service's MAX_SESSION_SECONDS (1800)
+    # plus publish retries and queue lag.
+    active_session_cutoff_seconds: int = 2100
 
 
 @lru_cache

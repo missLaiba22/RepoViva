@@ -359,7 +359,9 @@ precedes a 1011 close.
 `seq` is the question's position in the plan (decision 053; it replaced
 `turn_id`, a Postgres row id). `plan_not_ready` precedes a 1008 close when
 a session starts before its plan is ready, and the interview is reported
-`interrupted` (decision 052).
+`interrupted` (decision 052). `session_time_limit` precedes a 1008 close
+when a session reaches `MAX_SESSION_SECONDS` (default 1800), also reported
+`interrupted` (decision 059).
 
 Close codes: `1000` normal end · `1008` missing, invalid or rejected
 token (one generic reason; the specific 403 reason is only logged,
@@ -413,6 +415,7 @@ see decision 031 for why that split exists and what it fixed.
 5. The user answers. The client streams microphone audio as binary frames and sends `audio.end` when the user stops. Voice Service compresses the buffered audio to MP3 (decision 047) and transcribes it with Groq Whisper, using the question as prompt (decision 043), sends `transcript.final`, records the answer (turn → `answered`) and sends `turn.complete`. Silence or an over-long answer gets an `error` and the turn waits for another try.
 6. **Follow-up turns:** retrieve with the previous question plus the answer, excluding every chunk already used → generate with the full history → ask. Repeat until `MAX_QUESTIONS` (default 6) or the client sends `session.end`.
 7. On session end, Voice Service publishes `interview.ended` with outcome `completed` (budget reached or user stopped) or `interrupted` (disconnect or error) (decisions 036, 041, 057). Core API's worker ends the interview and Evaluation's worker starts the report (see below).
+8. If Voice crashes or the event is lost, the interview stays `active` only until the user next reads it after `ACTIVE_SESSION_CUTOFF_SECONDS` (default 2100, above Voice's 30-minute session limit): Core API then ends it `interrupted`, and the first report read starts the report through the usual 404 recovery (decision 059).
 
 Each turn's `timings` records `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tts_ms` and `stt_ms`, and the same values are logged. Together they cover decision 006's latency path, from the end of the user's speech (STT) to the next question's audio starting (retrieval, LLM, TTS first byte).
 
@@ -534,7 +537,6 @@ Open decisions that will shape architecture:
 - Choice of managed Postgres provider (Supabase or Neon)
 - Full data model (fields per entity, per-service schemas)
 - Streaming STT (live captions, server-side end-of-speech detection) and barge-in (decisions 043, 045)
-- Stuck `active` interviews after a Voice Service crash (decision 036's revisit trigger)
 - Retry semantics for failed ingestions (retry-in-place vs new row)
 - Logout endpoint (deferred — no state to clean up server-side, so it's a cookie-clear + redirect when needed)
 - Whether to migrate from signed cookies to JWTs if the session payload grows

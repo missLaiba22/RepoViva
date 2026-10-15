@@ -220,6 +220,7 @@ def get_interview_for_user(
     None for "doesn't exist" and "not yours" alike — the router answers
     404 either way, same rule as repositories.
     """
+    end_overdue_sessions(db, owner_user_id=owner_user_id)
     stmt = select(Interview).where(
         Interview.id == interview_id,
         Interview.owner_user_id == owner_user_id,
@@ -229,12 +230,48 @@ def get_interview_for_user(
 
 def list_interviews_for_user(db: Session, *, owner_user_id: int) -> list[Interview]:
     """List a user's interviews, newest first."""
+    end_overdue_sessions(db, owner_user_id=owner_user_id)
     stmt = (
         select(Interview)
         .where(Interview.owner_user_id == owner_user_id)
         .order_by(Interview.created_at.desc())
     )
     return list(db.scalars(stmt))
+
+
+# --- Sessions Voice never reported (decision 059) ---------------------------
+
+OVERDUE_SESSION_MESSAGE = "session ended without a report from Voice Service"
+
+
+def end_overdue_sessions(db: Session, *, owner_user_id: int) -> list[int]:
+    """End the user's `active` interviews that started before the cutoff.
+
+    Voice limits a session to 30 minutes, so past the cutoff no session can
+    still be live: Voice crashed, or its end event was lost. Their report
+    then starts through the usual 404 recovery (decision 049).
+    """
+    cutoff = timedelta(seconds=get_settings().active_session_cutoff_seconds)
+    stmt = (
+        update(Interview)
+        .where(
+            Interview.owner_user_id == owner_user_id,
+            Interview.status == InterviewStatus.ACTIVE.value,
+            Interview.session_token_consumed_at < func.now() - cutoff,
+        )
+        .values(
+            status=InterviewStatus.INTERRUPTED.value,
+            ended_at=func.now(),
+            error_message=OVERDUE_SESSION_MESSAGE,
+        )
+        .returning(Interview.id)
+        .execution_options(synchronize_session=False)
+    )
+    ended = list(db.scalars(stmt))
+    if ended:
+        db.commit()
+        logger.warning("ended overdue interviews as interrupted: %s", ended)
+    return ended
 
 
 # --- End of interview, from Voice Service's interview.ended (decisions 036, 057)

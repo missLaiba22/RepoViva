@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -16,11 +17,21 @@ from core_api.repositories.router import router as repositories_router
 from core_api.users.router import router as users_router
 
 configure_logging()
+logger = logging.getLogger(__name__)
+
+# Voice Service's default MAX_SESSION_SECONDS (decision 059).
+_VOICE_SESSION_LIMIT_SECONDS = 1800
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    if settings.active_session_cutoff_seconds <= _VOICE_SESSION_LIMIT_SECONDS:
+        logger.warning(
+            "ACTIVE_SESSION_CUTOFF_SECONDS=%d is not above Voice's session limit (%d s): "
+            "live interviews may be ended as interrupted",
+            settings.active_session_cutoff_seconds, _VOICE_SESSION_LIMIT_SECONDS,
+        )
     open_sync_client()
     open_messaging(
         region=settings.aws_region,
