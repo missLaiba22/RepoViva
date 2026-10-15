@@ -2661,6 +2661,15 @@ its own limits or retry policy (give it its own client).
 
 *Status: decided 2026-10-12, not yet implemented.*
 
+*Amended 2026-10-15 for decision 057:* IDs also cross the queues.
+`send_job` and `publish_event` put the current ID in the envelope's
+`request_id`; the worker sets it from the message before running the
+handler, or generates one if it is `null`. An interview therefore has
+two IDs: one from `POST /v1/interviews` through planning, one from the
+WebSocket through `interview.ended` and the report. `new_request_id()`
+serves work with no incoming request or message. `BackgroundTasks` and
+Evaluation's startup resume, named below, no longer exist.
+
 **Decision:**
 Every HTTP request and WebSocket connection carries a request ID that
 appears in every log line and is forwarded on every outbound call. One

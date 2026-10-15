@@ -1,17 +1,30 @@
 """One long-lived httpx client per service (decision 055).
 
 Keeps connections (and TLS sessions) open between calls. Callers that need
-a different timeout pass `timeout=` on the request.
+a different timeout pass `timeout=` on the request. Every request carries the
+current request ID (decision 056).
 """
 
 from __future__ import annotations
 
 import httpx
 
+from repoviva_common.request_id import HEADER, get_request_id
+
 DEFAULT_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 DEFAULT_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20)
 # Retries only failed connection attempts: the request never reached the server.
 CONNECT_RETRIES = 1
+
+
+def _add_request_id(request: httpx.Request) -> None:
+    request_id = get_request_id()
+    if request_id is not None:
+        request.headers[HEADER] = request_id
+
+
+async def _add_request_id_async(request: httpx.Request) -> None:
+    _add_request_id(request)
 
 
 def create_async_client(
@@ -21,6 +34,7 @@ def create_async_client(
         timeout=DEFAULT_TIMEOUT,
         limits=DEFAULT_LIMITS,
         transport=transport or httpx.AsyncHTTPTransport(retries=CONNECT_RETRIES),
+        event_hooks={"request": [_add_request_id_async]},
     )
 
 
@@ -29,6 +43,7 @@ def create_sync_client(*, transport: httpx.BaseTransport | None = None) -> httpx
         timeout=DEFAULT_TIMEOUT,
         limits=DEFAULT_LIMITS,
         transport=transport or httpx.HTTPTransport(retries=CONNECT_RETRIES),
+        event_hooks={"request": [_add_request_id]},
     )
 
 

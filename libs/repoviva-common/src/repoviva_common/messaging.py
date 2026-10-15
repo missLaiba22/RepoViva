@@ -17,6 +17,8 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ValidationError
 
+from repoviva_common.request_id import get_request_id, request_id_scope
+
 logger = logging.getLogger(__name__)
 
 # A message stays hidden from other workers this long; the heartbeat keeps
@@ -83,12 +85,12 @@ def get_events_client() -> Any:
     return _events
 
 
-def build_message(type: str, data: dict[str, Any], *, request_id: str | None = None) -> Message:
+def build_message(type: str, data: dict[str, Any]) -> Message:
     return Message(
         message_id=str(uuid4()),
         type=type,
         occurred_at=datetime.now(UTC),
-        request_id=request_id,
+        request_id=get_request_id(),
         data=data,
     )
 
@@ -191,7 +193,9 @@ async def handle_one(sqs: Any, queue_url: str, raw: dict[str, Any], handler: Han
 
     heartbeat = asyncio.create_task(_extend_visibility(sqs, queue_url, receipt))
     try:
-        await handler(message)
+        # Messages sent before request IDs shipped carry null; they get a new one.
+        with request_id_scope(message.request_id):
+            await handler(message)
     except Exception:
         logger.exception(
             "handler failed, message will be redelivered: type=%s message_id=%s",
