@@ -3,14 +3,16 @@
 Called by the worker for each `ingestion.requested` job (decision 057).
 Publishes status events at each stage boundary (decisions 026, 057).
 Pipeline errors are caught and reported as `ingestion.failed`; only a crash
-leaves the job `in_progress`, so the redelivered message reruns it.
+leaves the job `in_progress`, so the redelivered message reruns it, up to
+`MAX_ATTEMPTS`. A redelivered finished job publishes its outcome again, so a
+lost final event is never final (decision 058).
 """
 
 from __future__ import annotations
 
 import logging
 
-from repository_service.clients.events import get_event_publisher
+from repository_service.clients.events import IngestionEventPublisher, get_event_publisher
 from repository_service.config import get_settings
 from repository_service.db import get_db_pool
 from repository_service.indexing import RepositoryTooLargeError, run_indexing
@@ -20,6 +22,12 @@ from repository_service.ingestion.jobs import IngestionJob, JobStatus
 
 logger = logging.getLogger(__name__)
 
+CRASHED_MESSAGE = "ingestion stopped after repeated crashes"
+
+
+class OutcomeNotPublishedError(Exception):
+    """The final event was lost; raised so SQS redelivers the job."""
+
 
 async def run_ingestion(repository_id: str) -> None:
     pool = get_db_pool()
@@ -27,27 +35,52 @@ async def run_ingestion(repository_id: str) -> None:
     if job is None:
         logger.warning("no ingestion job: repository_id=%s", repository_id)
         return
+    events = get_event_publisher()
     if job.status in jobs.TERMINAL:
         logger.info(
-            "ingestion already %s, skipping: repository_id=%s", job.status, repository_id,
+            "ingestion already %s, publishing it again: repository_id=%s",
+            job.status, repository_id,
         )
+        await _publish_outcome(events, repository_id, job.status, job.error_message)
+        return
+
+    if job.attempts > jobs.MAX_ATTEMPTS:
+        logger.error(
+            "ingestion crashed %d times, failing it: repository_id=%s",
+            job.attempts - 1, repository_id,
+        )
+        await jobs.set_status(pool, repository_id, JobStatus.FAILED, CRASHED_MESSAGE)
+        await _publish_outcome(events, repository_id, JobStatus.FAILED, CRASHED_MESSAGE)
         return
 
     logger.info(
-        "ingestion started: repository_id=%s github_url=%s", repository_id, job.github_url,
+        "ingestion started: repository_id=%s github_url=%s attempt=%d",
+        repository_id, job.github_url, job.attempts,
     )
-    events = get_event_publisher()
     await events.emit_event(repository_id, "ingestion.started")
 
     error_message = await _ingest(job)
 
-    if error_message is None:
-        await jobs.set_status(pool, repository_id, JobStatus.READY)
-        await events.emit_event(repository_id, "ingestion.completed")
-        logger.info("ingestion completed: repository_id=%s", repository_id)
+    status = JobStatus.READY if error_message is None else JobStatus.FAILED
+    await jobs.set_status(pool, repository_id, status, error_message)
+    await _publish_outcome(events, repository_id, status, error_message)
+    logger.info("ingestion %s: repository_id=%s", status, repository_id)
+
+
+async def _publish_outcome(
+    events: IngestionEventPublisher,
+    repository_id: str,
+    status: JobStatus,
+    error_message: str | None,
+) -> None:
+    if status is JobStatus.READY:
+        published = await events.emit_event(repository_id, "ingestion.completed")
     else:
-        await jobs.set_status(pool, repository_id, JobStatus.FAILED)
-        await events.emit_event(repository_id, "ingestion.failed", error_message=error_message)
+        published = await events.emit_event(
+            repository_id, "ingestion.failed", error_message=error_message,
+        )
+    if not published:
+        raise OutcomeNotPublishedError(f"{status} event for repository {repository_id} lost")
 
 
 async def _ingest(job: IngestionJob) -> str | None:

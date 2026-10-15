@@ -27,11 +27,10 @@ class IngestionEventPublisher:
         event_type: IngestionEventType,
         *,
         error_message: str | None = None,
-    ) -> None:
-        """Best-effort after retries. Core API's loose state machine (decision
-        029) tolerates a lost `started`; a lost final event leaves the status
-        `in_progress`."""
-        await publish_event_with_retry(
+    ) -> bool:
+        """False if every retry failed. A lost `started` is harmless (decision 029);
+        the caller makes a lost final event redeliver the job (decision 058)."""
+        return await publish_event_with_retry(
             self._bus_name,
             SOURCE,
             event_type,

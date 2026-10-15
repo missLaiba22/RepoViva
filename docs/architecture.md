@@ -375,16 +375,21 @@ or the session failed mid-way, including an STT or TTS provider error).
    `ingestion.requested` job `{ repository_id, github_url }` on
    `ingestion-jobs`. If the send fails, it marks the row `failed` with
    an `error_message` right away. Either way it returns 201 with the row.
-3. Repository Service's worker receives the job, claims an
-   `ingestion_jobs` row, and runs `run_ingestion(repository_id)` unless
-   that row is already `ready` or `failed`.
+3. Repository Service's worker receives the job and claims an
+   `ingestion_jobs` row (each claim of an `in_progress` row counts an
+   attempt). If the row is already `ready` or `failed`, it publishes that
+   outcome again and stops; if it has crashed twice, it marks it `failed`
+   and publishes `ingestion.failed` (decision 058). Otherwise it runs
+   `run_ingestion(repository_id)`.
 4. The pipeline publishes `ingestion.started` → shallow-clones the repo
    into `workspace/<repository_id>/` → walks, chunks, and embeds the
    source tree via a per-repository CocoIndex App (decision 031), writing
    rows to the shared `code_chunks` table → publishes
    `ingestion.completed` (or `ingestion.failed` with the fetch or
    indexing error). Pipeline errors end as `failed`; only a crash leaves
-   the job `in_progress`, and SQS redelivers it.
+   the job `in_progress`, and SQS redelivers it. If the final event can't
+   be published, the handler raises so SQS redelivers the job, which then
+   publishes the stored outcome (decision 058).
 5. Core API's worker applies the loose state machine on each event
    (decision 029): `queued`/`in_progress` move to
    `in_progress`/`ready`/`failed`; terminal states reject further events,
@@ -429,8 +434,8 @@ Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row 
     *A table for processed inbound event IDs may be added later
     if decision 029 is revisited and dedup becomes necessary.*
   - Repository Service schema: `ingestion_jobs` (one row per repository:
-    `github_url` and the job's own `status`, so a redelivered job can
-    check it, decision 057) and `code_chunks` (chunk text + Voyage
+    `github_url`, the job's own `status`, `attempts` and `error_message`,
+    so a redelivered job can check it, decisions 057, 058) and `code_chunks` (chunk text + Voyage
     embeddings, one row per code chunk, primary key
     `(repository_id, id)` — see decision 031). *Currently created in
     the default `public` schema, not a dedicated per-service schema
@@ -466,7 +471,7 @@ Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row 
 - Inter-service jobs and events go through SQS and EventBridge (decision 057). Locally, LocalStack runs both (`docker compose up -d`; `infra/localstack/init-queues.sh` creates the bus, rules, queues and DLQs). On AWS, IAM task roles replace HMAC on these paths.
 - Internal service-to-service HTTP calls are authenticated with HMAC-SHA256 over `timestamp + "." + body`, with a 60-second freshness window and a single shared secret (see decision 027). All services use the shared `libs/repoviva-common` package for signing, verification and the `verify_hmac` dependency (decision 054); it holds infrastructure only, never domain code.
 - Each service makes all outbound HTTP calls through one long-lived httpx client opened in its lifespan (decision 055): `AsyncClient` in the async services, `Client` in Core API, whose routes are sync.
-- Ingestion status is observable end to end (decisions 029, 057): Repository Service publishes `ingestion.started`/`completed`/`failed`, Core API's worker applies a loose state machine, and `GET /v1/repositories/{id}` shows the current state. Events are retried by SQS and land eventually; they are not deduplicated by `message_id`, because every consumer is idempotent without it. A job that crashes on every attempt ends in the DLQ while the row still shows `in_progress`.
+- Ingestion status is observable end to end (decisions 029, 057): Repository Service publishes `ingestion.started`/`completed`/`failed`, Core API's worker applies a loose state machine, and `GET /v1/repositories/{id}` shows the current state. Events are retried by SQS and land eventually; they are not deduplicated by `message_id`, because every consumer is idempotent without it. Every ingestion ends `ready` or `failed` (decision 058): a job that crashes twice is failed on its next delivery, and a lost final event is published again on redelivery. Only Core API's own handler failing three times leaves a row stuck, in its DLQ.
 - Core API's Alembic autogenerate manages only tables with a Core API model (`include_object` hook, decision 037); other services' tables in the shared database are invisible to it.
 
 ## Decided, not yet implemented

@@ -56,3 +56,8 @@ CREATE TABLE IF NOT EXISTS ingestion_jobs (
     status TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Decision 058: crashes are counted so a job always ends; the error is
+-- kept so a failed outcome can be published again.
+ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS error_message TEXT;

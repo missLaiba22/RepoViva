@@ -72,6 +72,7 @@ async def test_orchestrator_reports_too_large_as_failed(monkeypatch) -> None:
     class FakeClient:
         async def emit_event(self, repository_id, event, *, error_message=None):
             events.append((repository_id, event, error_message))
+            return True
 
     class FakeFetchResult:
         clone_path = Path("/unused")
@@ -94,7 +95,7 @@ async def test_orchestrator_reports_too_large_as_failed(monkeypatch) -> None:
     async def fake_get(_pool, repository_id):
         return IngestionJob(repository_id, "https://github.com/x/y", JobStatus.IN_PROGRESS)
 
-    async def fake_set_status(_pool, _repository_id, _status):
+    async def fake_set_status(_pool, _repository_id, _status, _error_message=None):
         pass
 
     monkeypatch.setattr(jobs, "get", fake_get)

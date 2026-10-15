@@ -2896,3 +2896,53 @@ part ships on its own and removes its HTTP path.
 A consumer needs strict ordering (FIFO), a duplicate causes a visible bug
 (add `event_id` dedup), a publish-after-commit gap shows up in practice
 (add an outbox), or volume or replay needs outgrow SQS/EventBridge.
+
+---
+
+## 058 — Ingestion always ends in a terminal state
+
+*Status: decided and implemented 2026-10-15. Amends decision 057's claim rule for ingestion jobs.*
+
+**Decision:**
+Repository Service, which owns the ingestion job, makes sure every job
+ends `ready` or `failed` and that Core API hears about it:
+
+- **Attempt cap.** `ingestion_jobs` gets an `attempts` column; each claim
+  of an `in_progress` job adds one. A delivery that finds more than 2
+  attempts runs nothing: it marks the job `failed` and publishes
+  `ingestion.failed` ("ingestion stopped after repeated crashes"). The cap
+  is below the queue's `maxReceiveCount` (3), so the last delivery ends
+  the job cleanly; the DLQ stays as the backstop.
+- **Republish the outcome.** If the final event can't be published after
+  its retries, the handler raises and SQS redelivers the job. A delivery
+  that finds the job terminal publishes its stored outcome again instead
+  of doing nothing. `ingestion_jobs` gets an `error_message` column so a
+  `failed` outcome can be republished. Core API already treats a duplicate
+  as handled. `ingestion.started` stays best-effort.
+
+No new endpoint, job or event; event payloads are unchanged.
+
+**Why:**
+Two failures left a repository `queued` or `in_progress` forever: a job
+that crashed on every attempt ended in the DLQ with nothing reporting it,
+and a final event lost after its publish retries was never sent again,
+because the job message had already been deleted.
+
+**Options considered:**
+- A sweep in Core API that fails old non-terminal rows. Core doesn't know
+  the real state, and large repositories legitimately take a while, so a
+  guessed timeout would fail real ingestions.
+- A DLQ consumer that turns dead jobs into `ingestion.failed`. A consumer
+  per DLQ, and the message leaves the DLQ, so it can't be inspected.
+
+**Tradeoff:**
+A job that crashes twice is reported failed, even if a third try might
+have worked. A duplicate of a finished job republishes its event instead
+of doing nothing. Core API's own handler failing 3 times (its database
+down for minutes) still leaves the row stuck; the DLQ and its alarm
+cover that.
+
+**Revisit when:**
+Failed ingestions can be retried (the open retry-semantics question), or
+Core API needs to recover from its own lost events (a status query to
+Repository Service on read).
