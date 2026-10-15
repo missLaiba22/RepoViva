@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import BaseModel
 from repoviva_common.http import close_async_client, open_async_client
 from repoviva_common.messaging import Message, close_messaging, open_messaging, run_worker
+from repoviva_common.request_id import configure_logging
 
 from evaluation_service.config import get_settings
 from evaluation_service.db import apply_schema, close_pool, init_pool
@@ -87,8 +88,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging()
     asyncio.run(main())
