@@ -1,19 +1,16 @@
-import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from repoviva_common.http import close_async_client, open_async_client
 from repoviva_common.messaging import close_messaging, open_messaging
+from repoviva_common.request_id import RequestIDMiddleware, configure_logging
 
 from voice_service.config import get_settings
 from voice_service.db import close_db, ensure_indexes, init_db
 from voice_service.internal.router import router as internal_router
 from voice_service.ws import router as ws_router
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+configure_logging()
 
 
 @asynccontextmanager
@@ -42,6 +39,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.add_middleware(RequestIDMiddleware)
 
 app.include_router(ws_router)
 app.include_router(internal_router)
