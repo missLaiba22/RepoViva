@@ -95,10 +95,15 @@ class Sessions(Protocol):
 class SessionConfig:
     session_start_timeout_s: float
     max_answer_seconds: int = 180  # decision 043
+    max_session_seconds: float = 1800  # decision 059
 
 
 class _PlanNotReadyError(Exception):
     """The live page opens the socket only once the plan is ready (decision 052)."""
+
+
+class _SessionTimeLimitError(Exception):
+    """The session ran past `max_session_seconds` (decision 059)."""
 
 
 @dataclass(frozen=True)
@@ -144,7 +149,7 @@ class InterviewSession:
             if plan is None:
                 raise _PlanNotReadyError
             await ws.send_json(protocol.session_ready(session.interview_id))
-            outcome = await self._interview(ws, session.interview_id, plan)
+            outcome = await self._interview_within_limit(ws, session.interview_id, plan)
         except _PlanNotReadyError:
             # Only the token tells us the interview, so this check can only
             # come after the consume (decision 052).
@@ -153,6 +158,15 @@ class InterviewSession:
             )
             await self._ended(session, "interrupted", "plan not ready")
             await _safe_send(ws, protocol.error("plan_not_ready", "the interview isn't ready yet"))
+            await _safe_close(ws, _CLOSE_POLICY_VIOLATION)
+            return
+        except _SessionTimeLimitError:
+            logger.info("interview %s: session time limit reached", session.interview_id)
+            await self._ended(session, "interrupted", "session time limit reached")
+            await _safe_send(ws, protocol.error(
+                "session_time_limit",
+                f"interviews are limited to {int(self._config.max_session_seconds // 60)} minutes",
+            ))
             await _safe_close(ws, _CLOSE_POLICY_VIOLATION)
             return
         except WebSocketDisconnect:
@@ -215,6 +229,19 @@ class InterviewSession:
             logger.exception("could not reach Core API to consume session token")
             await _safe_close(ws, _CLOSE_INTERNAL_ERROR, _GENERIC_ADMISSION_FAILURE)
             return None
+
+    async def _interview_within_limit(
+        self, ws: Channel, interview_id: int, plan: Sequence[PlannedQuestion]
+    ) -> Outcome:
+        # A known maximum lets Core API end a session Voice never reported (decision 059).
+        limit = asyncio.timeout(self._config.max_session_seconds)
+        try:
+            async with limit:
+                return await self._interview(ws, interview_id, plan)
+        except TimeoutError:
+            if limit.expired():
+                raise _SessionTimeLimitError from None
+            raise
 
     async def _interview(
         self, ws: Channel, interview_id: int, plan: Sequence[PlannedQuestion]

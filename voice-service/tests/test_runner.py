@@ -127,7 +127,7 @@ class FakeSessions:
 
 
 def make(core=None, transcriber=None, synthesizer=None, plan=..., timeout=1.0,
-         max_answer_seconds=180):
+         max_answer_seconds=180, max_session_seconds=1800):
     parts = {
         "core": core or FakeCore(),
         "events": FakeEvents(),
@@ -141,7 +141,11 @@ def make(core=None, transcriber=None, synthesizer=None, plan=..., timeout=1.0,
         transcriber=parts["transcriber"],
         synthesizer=parts["synthesizer"],
         sessions=parts["sessions"],
-        config=SessionConfig(timeout, max_answer_seconds=max_answer_seconds),
+        config=SessionConfig(
+            timeout,
+            max_answer_seconds=max_answer_seconds,
+            max_session_seconds=max_session_seconds,
+        ),
     )
     return session, parts
 
@@ -217,6 +221,19 @@ async def test_disconnect_mid_interview_is_interrupted():
     assert p["events"].events == [(7, "interrupted", "client disconnected")]
     # The unanswered question is still on record (decision 008).
     assert statuses(p)[:3] == [("answered", "a"), ("asked", None), ("planned", None)]
+
+
+async def test_session_past_its_time_limit_is_interrupted():
+    # Regression (decision 059): an idle session used to stay active forever.
+    session, p = make(plan=planned(2), max_session_seconds=0.05)
+    ws = FakeSocket(START, answer("a"))  # then the client goes idle
+
+    await session.run(ws)
+
+    assert p["events"].events == [(7, "interrupted", "session time limit reached")]
+    assert ws.sent[-1]["code"] == "session_time_limit"
+    assert ws.closed[0] == 1008
+    assert statuses(p) == [("answered", "a"), ("asked", None)]
 
 
 @pytest.mark.parametrize(

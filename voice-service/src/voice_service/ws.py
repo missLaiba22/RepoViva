@@ -33,6 +33,7 @@ async def interview_socket(ws: WebSocket) -> None:
         config=SessionConfig(
             session_start_timeout_s=settings.session_start_timeout_s,
             max_answer_seconds=settings.max_answer_seconds,
+            max_session_seconds=settings.max_session_seconds,
         ),
     )
     await session.run(ws)

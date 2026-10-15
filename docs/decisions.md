@@ -1260,6 +1260,8 @@ which change the contract above:
 
 ## 036 — Interview lifecycle: four states, end-of-session reported via event callback
 
+*Amended by decision 059: Voice Service limits a session to 30 minutes, and Core API itself ends an `active` interview left past the cutoff as `interrupted`, so a crash no longer leaves it stuck.*
+
 **Decision:**
 Core API owns the `interviews` table and its `status`. States:
 
@@ -2946,3 +2948,55 @@ cover that.
 Failed ingestions can be retried (the open retry-semantics question), or
 Core API needs to recover from its own lost events (a status query to
 Repository Service on read).
+
+---
+
+## 059 — An active interview always ends
+
+*Status: decided and implemented 2026-10-15. Amends decision 036.*
+
+**Decision:**
+- **Voice Service limits a session** to `MAX_SESSION_SECONDS` (default
+  1800). A session that reaches it ends `interrupted` ("session time
+  limit reached"): Voice publishes `interview.ended`, sends an `error`
+  with code `session_time_limit`, and closes with 1008.
+- **Core API ends overdue sessions on read.** Before reading interviews
+  (get, list, report, report retry), one `UPDATE` scoped to the user
+  moves `active` interviews whose token was consumed more than
+  `ACTIVE_SESSION_CUTOFF_SECONDS` ago (default 2100) to `interrupted`,
+  with "session ended without a report from Voice Service".
+- **The report needs nothing new.** The first report read then gets a
+  404 from Evaluation, so Core sends `report.requested` (decision 049).
+  Turns are already in MongoDB, so the user gets a partial report.
+
+The cutoff must exceed Voice's limit plus publish retries and queue lag;
+Core API logs a warning at startup if it is under 1800 seconds.
+
+**Why:**
+Four failures left an interview `active` forever, with no report: Voice
+crashing or restarting mid-session, `interview.ended` lost after its
+publish retries, Voice never receiving the token-consume response after
+Core committed it, and Core's own handler failing into the DLQ. In the
+first and third, Voice is gone or never knew, so only Core can notice.
+And with no session limit, Core couldn't tell a dead session from a long
+one.
+
+**Options considered:**
+- Voice republishes on startup or in a sweep. Misses the lost consume
+  response, and with several Voice instances one can't tell whether
+  another still runs a session.
+- A periodic sweep in Core API's worker. Works, but adds a scheduler and
+  ends interviews nobody is looking at.
+
+**Tradeoff:**
+- Two settings in two services must agree (the cutoff exceeds the limit).
+- A session that completed but lost its event is recorded `interrupted`;
+  the grading is the same, only the label differs.
+- An interview ends only when the user reads it, up to 35 minutes after
+  a crash. The report only matters then.
+- The WebSocket protocol gains the `session_time_limit` error code.
+
+**Revisit when:**
+Interviews need to run longer than 30 minutes, something other than the
+user needs ended interviews promptly (then a sweep), or sessions can be
+resumed after a Voice restart.

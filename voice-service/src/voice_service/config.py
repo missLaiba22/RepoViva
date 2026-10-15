@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     # Interview shape
     max_questions: int = 6  # decision 041: one planned question per area (052)
     session_start_timeout_s: float = 10.0  # decision 035's consequence
+    # Core API's ACTIVE_SESSION_CUTOFF_SECONDS must exceed this (decision 059).
+    max_session_seconds: int = 1800
     plan_chunks_per_area: int = 2  # decision 052: sized for Groq's per-minute tokens
 
 
