@@ -491,7 +491,9 @@ above and delete it here.
   from a new Repository Service endpoint,
   `GET /internal/v1/repositories/{id}/areas` (built, see above). It retrieves 2 chunks per area,
   for at most `MAX_QUESTIONS` areas, using `filename_prefix`, and writes the
-  whole ordered plan in one LLM call. Questions are scenario-based and never
+  whole ordered plan in one LLM call, one question per area. Repository
+  Service splits the largest areas until there are `MAX_QUESTIONS` or
+  nothing more splits (decision 060). Questions are scenario-based and never
   name code (decision 048's rules, now in the planning prompt).
 - `plan_status` (`generating` / `ready` / `failed`) lives only in Voice
   Service. The setup page is unchanged: Start creates the interview and

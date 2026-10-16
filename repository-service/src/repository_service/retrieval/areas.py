@@ -27,15 +27,39 @@ class Area:
     chunk_count: int
 
 
-def pick_areas(file_counts: dict[str, int]) -> list[Area]:
-    """Areas from per-file chunk counts, largest first.
+def pick_areas(file_counts: dict[str, int], limit: int) -> list[Area]:
+    """Up to `limit` areas from per-file chunk counts, largest first.
 
-    Start at the root. While there is exactly one directory, step into it
-    (the everything-in-`src/` layout). Two or more directories are the
-    areas. With none, each file at that level is an area. Files sitting
-    next to a single directory are dropped with the step down.
+    Start with the root's areas. While there are fewer than `limit`, replace
+    the largest directory that has two or more areas of its own with those
+    (decision 060). If the last split overshoots, keep the largest.
     """
-    prefix = ""
+    areas = _areas_under("", file_counts)
+    while len(areas) < limit:
+        split = next(
+            (
+                (area, children)
+                for area in areas
+                if area.path.endswith("/")
+                and len(children := _areas_under(area.path, file_counts)) >= 2
+            ),
+            None,
+        )
+        if split is None:
+            break
+        area, children = split
+        areas = _largest_first([a for a in areas if a != area] + children)
+    return areas[:limit]
+
+
+def _areas_under(prefix: str, file_counts: dict[str, int]) -> list[Area]:
+    """The areas directly under `prefix`, largest first.
+
+    While there is exactly one directory, step into it (the everything-in-
+    `src/` layout). Two or more directories are the areas. With none, each
+    file at that level is an area. Files sitting next to directories are
+    dropped.
+    """
     while True:
         dirs: Counter[str] = Counter()
         files: Counter[str] = Counter()
@@ -52,12 +76,15 @@ def pick_areas(file_counts: dict[str, int]) -> list[Area]:
             (prefix,) = dirs
             continue
         chosen = dirs or files
-        areas = [Area(path, count) for path, count in chosen.items()]
-        # Path breaks ties so the same repository always gives the same areas.
-        return sorted(areas, key=lambda a: (-a.chunk_count, a.path))
+        return _largest_first([Area(path, count) for path, count in chosen.items()])
+
+
+def _largest_first(areas: list[Area]) -> list[Area]:
+    # Path breaks ties so the same repository always gives the same areas.
+    return sorted(areas, key=lambda a: (-a.chunk_count, a.path))
 
 
 async def list_areas(pool: asyncpg.Pool, *, repository_id: str, limit: int) -> list[Area]:
-    """The `limit` largest areas; empty if the repository has no chunks."""
+    """Up to `limit` areas; empty if the repository has no chunks."""
     rows = await pool.fetch(_FILE_COUNTS_SQL, repository_id)
-    return pick_areas({row["filename"]: row["chunk_count"] for row in rows})[:limit]
+    return pick_areas({row["filename"]: row["chunk_count"] for row in rows}, limit)

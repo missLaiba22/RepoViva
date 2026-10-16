@@ -78,6 +78,46 @@ async def test_files_are_areas_when_there_are_no_directories(monkeypatch) -> Non
     ]
 
 
+BACKEND_FRONTEND = {
+    "backend/api/routes.py": 10,
+    "backend/db/models.py": 8,
+    "backend/services/billing.py": 7,
+    "frontend/src/App.tsx": 6,
+}
+
+
+async def test_largest_area_is_split_until_nothing_splits(monkeypatch) -> None:
+    # Decision 060: two top-level directories no longer mean two questions.
+    areas = await _areas(monkeypatch, BACKEND_FRONTEND, limit=6)
+
+    assert areas == [
+        {"path": "backend/api/", "chunk_count": 10},
+        {"path": "backend/db/", "chunk_count": 8},
+        {"path": "backend/services/", "chunk_count": 7},
+        {"path": "frontend/", "chunk_count": 6},
+    ]
+
+
+async def test_overshooting_split_keeps_the_largest(monkeypatch) -> None:
+    areas = await _areas(monkeypatch, BACKEND_FRONTEND, limit=3)
+
+    assert [a["path"] for a in areas] == ["backend/api/", "backend/db/", "backend/services/"]
+
+
+async def test_unsplittable_area_is_skipped_for_a_smaller_one(monkeypatch) -> None:
+    areas = await _areas(
+        monkeypatch,
+        {"big/core.py": 20, "small/a.py": 3, "small/b.py": 2},
+        limit=3,
+    )
+
+    assert areas == [
+        {"path": "big/", "chunk_count": 20},
+        {"path": "small/a.py", "chunk_count": 3},
+        {"path": "small/b.py", "chunk_count": 2},
+    ]
+
+
 async def test_no_chunks_gives_no_areas(monkeypatch) -> None:
     assert await _areas(monkeypatch, {}) == []
 

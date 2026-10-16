@@ -119,7 +119,7 @@ async def get_areas(
     repository_id: int,
     limit: int = Query(ge=1, le=50),
 ) -> AreasResponse:
-    """The repository's `limit` largest areas, for question planning (decision 052).
+    """Up to `limit` of the repository's areas, for question planning (decisions 052, 060).
 
     Always 200: no chunks gives an empty list, as /retrieve does.
     """

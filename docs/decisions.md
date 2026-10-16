@@ -2251,6 +2251,8 @@ read.*
 
 *Supersedes decision 034. Amends decisions 041, 042 and 048.*
 
+*Amended by decision 060: areas are split until there are `MAX_QUESTIONS`, and the plan has one question per area.*
+
 *Status: decided 2026-10-12, simplified 2026-10-13, not yet implemented.*
 
 **Decision:**
@@ -3000,3 +3002,58 @@ one.
 Interviews need to run longer than 30 minutes, something other than the
 user needs ended interviews promptly (then a sweep), or sessions can be
 resumed after a Voice restart.
+
+## 060 — Split the largest areas until the plan has `MAX_QUESTIONS` areas
+
+*Status: decided and implemented 2026-10-16. Amends decision 052.*
+
+**Context:**
+Decision 052 plans one question per area, and `pick_areas` stopped at
+the first level with two or more directories. A repository shaped like
+`backend/` + `frontend/` got exactly 2 questions, however large each
+half was: `MAX_QUESTIONS` only worked as a ceiling. 052's text said
+"`MAX_QUESTIONS` questions, one area per question where possible", but
+the code writes `len(areas)` questions.
+
+**Decision:**
+Repository Service's areas endpoint fills the limit by splitting the
+largest areas:
+1. Find the root's areas as before: step through single directories,
+   use directories if there are any, otherwise files.
+2. While there are fewer areas than `limit`, replace the largest area
+   that can be split with its own areas, found by the same rule from
+   that directory. An area can be split when it is a directory with at
+   least 2 areas of its own.
+3. Stop at `limit` or when nothing can be split. If the last split
+   overshoots, keep the `limit` largest.
+4. Largest first, ties broken by path, so a repository always gets the
+   same areas.
+
+The endpoint's contract and Voice Service don't change; `limit` now
+means "up to N areas, splitting the largest". 052's plan has one
+question per area.
+
+**Options considered:**
+- **More questions for large areas,** shared out by chunk count. Areas
+  stay broad, so questions on one area need more retrieval and a prompt
+  that stops them overlapping.
+- **Accept fewer questions.** Simplest, but a two-folder project gets a
+  2-question interview, too short to grade well.
+
+**Why:**
+- Keeps 052's model: one area, one question, 2 chunks per area.
+- Questions get more specific (the API layer, the data layer) instead
+  of "the backend".
+- One pure function changes; no contract change.
+
+**Tradeoff:**
+- Splitting can produce very small areas (a 1–2 chunk `utils/`) that
+  give thin questions.
+- An overshooting split drops its smallest children, which were covered
+  as part of their parent before.
+- Files next to directories are still ignored.
+- A tiny or flat repository can still get fewer than `MAX_QUESTIONS`.
+
+**Revisit when:**
+Questions on split areas overlap or feel too narrow, or small areas give
+weak questions: add a minimum area size, or share questions by size.
