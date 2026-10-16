@@ -36,9 +36,9 @@ export function SetupPage() {
     return (
       <EmptyState
         title="This repository isn't ready yet"
-        action={<ButtonLink to={`/repositories/${id}`}>See its status</ButtonLink>}
+        action={<ButtonLink to={`/repositories/${id}`}>See progress</ButtonLink>}
       >
-        Interviews start once indexing has finished.
+        Interviews open once we&rsquo;ve finished reading your code, usually within a few minutes.
       </EmptyState>
     );
   }
@@ -104,8 +104,8 @@ function Setup({ repository }: { repository: Repository }) {
 
       <ol className={styles.expect} aria-label="What to expect">
         <li>
-          <strong>Six questions about how your project works,</strong> asked out loud and shown on screen. Each
-          one follows up on what you said before.
+          <strong>Up to six questions about how your project works,</strong> each on a different part of it, read
+          aloud and shown on screen.
         </li>
         <li>
           <strong>Tap the microphone to answer, and tap again when you&rsquo;re done.</strong> There&rsquo;s no
@@ -169,7 +169,7 @@ function Setup({ repository }: { repository: Repository }) {
           )}
         </div>
         <p className={styles.privacy}>
-          Your answers are transcribed to text for grading. The audio itself is never stored.
+          Your answers are turned into text for your report. Recordings are never kept.
         </p>
       </div>
     </div>

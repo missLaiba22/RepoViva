@@ -47,7 +47,7 @@ export function ConnectRepositoryPage() {
     <div className={styles.page}>
       <header>
         <h1 className={styles.title}>Connect a repository</h1>
-        <p className={styles.lead}>RepoViva reads the code so every interview question is about your project.</p>
+        <p className={styles.lead}>Every interview question will be about this project.</p>
       </header>
 
       <Card className={styles.card}>
@@ -101,9 +101,9 @@ export function ConnectRepositoryPage() {
           What happens next
         </h2>
         <ol className={styles.steps}>
-          <li>RepoViva clones the repository&rsquo;s default branch.</li>
-          <li>It splits the code into pieces and indexes them, so questions can quote the right files.</li>
-          <li>Usually a few minutes. You can leave the page while it works.</li>
+          <li>RepoViva reads your code. This usually takes a few minutes.</li>
+          <li>You can leave the page while it works. It shows as ready on your home page.</li>
+          <li>Then start an interview whenever you like.</li>
         </ol>
       </section>
     </div>

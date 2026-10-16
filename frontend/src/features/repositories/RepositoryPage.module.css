@@ -77,16 +77,6 @@
   font-size: var(--text-sm);
 }
 
-.errorDetail {
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-
 .actions {
   display: flex;
   flex-wrap: wrap;

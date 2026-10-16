@@ -19,7 +19,7 @@ export type Phase =
   | "done"
   | "failed";
 
-export type Failure = "rejected" | "lost" | "internal";
+export type Failure = "rejected" | "lost" | "internal" | "time_limit";
 
 export interface LiveState {
   phase: Phase;
@@ -63,6 +63,8 @@ const NOTICES: Record<string, string> = {
   answer_too_long: "That answer ran past 3 minutes and wasn't kept. Please answer again, a little shorter.",
   bad_message: "Something went wrong sending that answer. Please try again.",
 };
+
+const FALLBACK_NOTICE = "Something went wrong with that answer. Please try again.";
 
 const FINISHED: Phase[] = ["done", "failed"];
 
@@ -131,7 +133,8 @@ function onServer(state: LiveState, msg: ServerMessage): LiveState {
 
     case "error":
       if (msg.code === "internal_error") return { ...state, phase: "failed", failure: "internal" };
+      if (msg.code === "session_time_limit") return { ...state, phase: "failed", failure: "time_limit" };
       if (state.phase === "ending") return state;
-      return { ...state, phase: "answering", notice: NOTICES[msg.code] ?? msg.message };
+      return { ...state, phase: "answering", notice: NOTICES[msg.code] ?? FALLBACK_NOTICE };
   }
 }

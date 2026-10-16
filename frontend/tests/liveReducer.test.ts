@@ -72,6 +72,25 @@ describe("liveReducer", () => {
     expect(state).toMatchObject({ phase: "failed", failure: "internal" });
   });
 
+  it("reads the session time limit as time up, not a lost connection", () => {
+    const state = run([
+      server({ type: "session.ready", interview_id: 1 }),
+      ...asked(),
+      server({ type: "error", code: "session_time_limit", message: "x" }),
+      { type: "closed", code: 1008 },
+    ]);
+    expect(state).toMatchObject({ phase: "failed", failure: "time_limit" });
+  });
+
+  it("never shows the server's raw error text", () => {
+    const state = run([
+      server({ type: "session.ready", interview_id: 1 }),
+      ...asked(),
+      server({ type: "error", code: "something_new", message: "KeyError: turn_id" }),
+    ]);
+    expect(state.notice).not.toContain("KeyError");
+  });
+
   it("ends by the user's request, even if the server only closes", () => {
     const ending = run([server({ type: "session.ready", interview_id: 1 }), ...asked(), { type: "end_requested" }]);
     expect(ending.phase).toBe("ending");

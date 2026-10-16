@@ -58,8 +58,7 @@ function Turn({ turn, githubUrl }: { turn: TurnEvaluation; githubUrl: string }) 
 
         {turn.status === "not_graded" ? (
           <p className={styles.meta}>
-            The grader couldn&rsquo;t produce a usable result for this answer, so it isn&rsquo;t scored or counted in the
-            averages.
+            We couldn&rsquo;t score this answer, so it isn&rsquo;t counted in your averages.
           </p>
         ) : (
           <>

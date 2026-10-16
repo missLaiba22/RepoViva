@@ -130,10 +130,10 @@ describe("live interview", () => {
   it("runs a spoken answer: record, stream audio, audio.end, transcript, next question", async () => {
     const { ws } = await startLive();
     act(() => ws.push({ type: "session.ready", interview_id: 21 }));
-    expect(await screen.findByText(/preparing the first question/i)).toBeInTheDocument();
+    expect(await screen.findByText(/first question ready/i)).toBeInTheDocument();
 
     await askQuestion(ws, 1, "Why does checkout sort items before locking?");
-    expect(screen.getByText("Question 1 of 6")).toBeInTheDocument();
+    expect(screen.getByText("Question 1")).toBeInTheDocument();
     await waitFor(() => expect(audio.opened).toBe(1));
 
     await userEvent.click(await screen.findByRole("button", { name: /start answering/i }));
@@ -149,10 +149,10 @@ describe("live interview", () => {
       ws.push({ type: "turn.complete", turn_id: 10 });
     });
     expect(screen.getByText("So two checkouts never deadlock.")).toBeInTheDocument();
-    expect(screen.getByText(/thinking of the next question/i)).toBeInTheDocument();
+    expect(screen.getByText(/loading the next question/i)).toBeInTheDocument();
 
     await askQuestion(ws, 2, "What happens if the promo is invalid?");
-    expect(screen.getByText("Question 2 of 6")).toBeInTheDocument();
+    expect(screen.getByText("Question 2")).toBeInTheDocument();
   });
 
   it("lets the user try again after no speech", async () => {
@@ -211,7 +211,7 @@ describe("live interview", () => {
   it("explains an expired or reused session", async () => {
     const { ws } = await startLive();
     act(() => ws.close(1008));
-    expect(await screen.findByRole("heading", { name: /session has expired/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /interview has expired/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /start a new interview/i })).toHaveAttribute(
       "href",
       "/repositories/15/interview",

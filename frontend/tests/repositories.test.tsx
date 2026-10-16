@@ -83,7 +83,7 @@ describe("repository page", () => {
       "GET /v1/repositories/15": { body: repository({ status: "in_progress" }) },
     });
     renderApp("/repositories/15");
-    expect(await screen.findByRole("heading", { name: /indexing your code/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /reading your code/i })).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
 
     api.fetchMock.mockImplementation(async () => new Response(JSON.stringify(repository()), { status: 200 }));
@@ -93,15 +93,16 @@ describe("repository page", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
-  it("shows why indexing failed and a way forward", async () => {
+  it("explains a failed repository in plain words, without the raw error", async () => {
     stubApi({
       "GET /v1/me": { body: USER },
-      "GET /v1/repositories/17": { body: repository({ id: 17, status: "failed", error_message: "clone failed: not found" }) },
+      "GET /v1/repositories/17": { body: repository({ id: 17, status: "failed", error_message: "repository too large: 9,000 chunks (limit 6,000)" }) },
     });
     renderApp("/repositories/17");
 
-    expect(await screen.findByText("clone failed: not found")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /connect another repository/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /too large/i })).toBeInTheDocument();
+    expect(screen.queryByText(/chunks/)).toBeNull();
+    expect(screen.getByRole("link", { name: /connect a repository/i })).toBeInTheDocument();
   });
 
   it("says not found for someone else's or a missing repository", async () => {

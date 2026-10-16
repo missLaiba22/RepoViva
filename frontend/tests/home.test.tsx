@@ -24,7 +24,7 @@ describe("home", () => {
     signedIn([
       repository(),
       repository({ id: 16, github_url: "https://github.com/missLaiba22/repoviva", status: "in_progress" }),
-      repository({ id: 17, github_url: "https://github.com/a/broken", status: "failed", error_message: "Clone failed" }),
+      repository({ id: 17, github_url: "https://github.com/a/broken", status: "failed", error_message: "fetch failed: git clone exited 128" }),
     ]);
     renderApp("/home");
 
@@ -36,9 +36,10 @@ describe("home", () => {
       "href",
       "/repositories/15/interview",
     );
-    expect(within(rows[1]).getByText("Indexing")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("Reading code")).toBeInTheDocument();
     expect(within(rows[1]).queryByRole("link", { name: /start interview/i })).toBeNull();
-    expect(within(rows[2]).getByText("Clone failed")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("We couldn't open this repository")).toBeInTheDocument();
+    expect(within(rows[2]).queryByText(/git clone/)).toBeNull();
   });
 
   it("lists interviews with a report link only once they have ended", async () => {
@@ -77,7 +78,7 @@ describe("home", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const api = signedIn([repository({ status: "in_progress" })]);
     renderApp("/home");
-    await screen.findByText("Indexing");
+    await screen.findByText("Reading code");
 
     api.fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const path = String(input);

@@ -140,6 +140,6 @@ describe("interview setup", () => {
     renderApp("/repositories/15/interview");
 
     expect(await screen.findByRole("heading", { name: /isn't ready yet/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /see its status/i })).toHaveAttribute("href", "/repositories/15");
+    expect(screen.getByRole("link", { name: /see progress/i })).toHaveAttribute("href", "/repositories/15");
   });
 });

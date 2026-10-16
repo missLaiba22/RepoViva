@@ -21,8 +21,6 @@ export const CLOSE_NORMAL = 1000;
 export const CLOSE_REJECTED = 1008;
 export const CLOSE_INTERNAL = 1011;
 
-/** Voice Service's MAX_QUESTIONS default (decision 041). The server doesn't send it. */
-export const QUESTIONS_PER_INTERVIEW = 6;
 /** The server's limit is 180 s; stop a little early so it never has to refuse. */
 export const MAX_ANSWER_SECONDS = 175;
 export const MAX_TEXT_ANSWER = 5000;

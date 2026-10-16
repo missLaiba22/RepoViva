@@ -2,12 +2,13 @@ import type { Repository } from "../../api/types";
 import { ButtonLink } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { formatDate, repoName } from "../../lib/format";
+import { repositoryProblem } from "./problem";
 import { StatusChip } from "./StatusChip";
 import styles from "./RepositoryList.module.css";
 
 const HINTS: Partial<Record<Repository["status"], string>> = {
-  queued: "Waiting to be indexed",
-  in_progress: "Indexing your code, usually a few minutes. You can leave this page.",
+  queued: "Starting soon. You can leave this page.",
+  in_progress: "Reading your code, usually a few minutes. You can leave this page.",
 };
 
 export function RepositoryList({ repositories }: { repositories: Repository[] }) {
@@ -16,7 +17,7 @@ export function RepositoryList({ repositories }: { repositories: Repository[] })
       <ul className={styles.list} aria-label="Repositories">
         {repositories.map((repo) => {
           const { owner, name } = repoName(repo.github_url);
-          const hint = repo.status === "failed" ? repo.error_message ?? "Indexing failed." : HINTS[repo.status];
+          const hint = repo.status === "failed" ? repositoryProblem(repo.error_message).title : HINTS[repo.status];
           return (
             <li key={repo.id} className={styles.row}>
               <div className={styles.main}>
@@ -37,7 +38,7 @@ export function RepositoryList({ repositories }: { repositories: Repository[] })
                 </ButtonLink>
               ) : (
                 <ButtonLink to={`/repositories/${repo.id}`} variant="ghost" className={styles.action}>
-                  Details
+                  {repo.status === "failed" ? "What to do" : "View progress"}
                 </ButtonLink>
               )}
             </li>

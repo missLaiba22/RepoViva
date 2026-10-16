@@ -12,6 +12,7 @@ import { usePolling } from "../../hooks/usePolling";
 import { useResource } from "../../hooks/useResource";
 import { formatRelative, repoName } from "../../lib/format";
 import { getRepository, isIndexing } from "./api";
+import { repositoryProblem } from "./problem";
 import { StatusChip } from "./StatusChip";
 import styles from "./RepositoryPage.module.css";
 
@@ -75,13 +76,13 @@ function StatusPanel({ repository }: { repository: Repository }) {
     return (
       <div className={styles.panel} aria-live="polite">
         <div className={styles.panelHead}>
-          <h2 className={styles.panelTitle}>{status === "queued" ? "Waiting to start" : "Indexing your code"}</h2>
+          <h2 className={styles.panelTitle}>{status === "queued" ? "Waiting to start" : "Reading your code"}</h2>
           <StatusChip status={status} />
         </div>
-        <ProgressBar label="Indexing" />
+        <ProgressBar label="Reading your code" />
         <p className={styles.body}>
-          Usually a few minutes. You can leave this page; indexing carries on and the repository will show as ready
-          on your home page.
+          Usually a few minutes. You can leave this page; it carries on, and the repository will show as ready on
+          your home page.
         </p>
         <p className={styles.meta}>Started {formatRelative(repository.created_at)}</p>
       </div>
@@ -96,8 +97,8 @@ function StatusPanel({ repository }: { repository: Repository }) {
           <StatusChip status={status} />
         </div>
         <p className={styles.body}>
-          Six spoken questions about how this project works, each followed up on what you say. About 15 minutes,
-          and you can stop at any point.
+          Up to six spoken questions, each about a different part of this project. About 15 minutes, and you can
+          stop at any point.
         </p>
         <div className={styles.actions}>
           <ButtonLink to={`/repositories/${repository.id}/interview`} size="large">
@@ -111,19 +112,18 @@ function StatusPanel({ repository }: { repository: Repository }) {
     );
   }
 
+  const problem = repositoryProblem(repository.error_message);
   return (
     <div className={styles.panel} aria-live="polite">
       <div className={styles.panelHead}>
-        <h2 className={styles.panelTitle}>Indexing didn&rsquo;t finish</h2>
+        <h2 className={styles.panelTitle}>{problem.title}</h2>
         <StatusChip status={status} />
       </div>
-      {repository.error_message && <p className={styles.errorDetail}>{repository.error_message}</p>}
-      <p className={styles.body}>
-        Check that the repository is public and the link is right. Very large repositories can also fail.
-      </p>
+      <p className={styles.body}>{problem.body}</p>
       <div className={styles.actions}>
-        <ButtonLink to="/repositories/new" variant="secondary">
-          Connect another repository
+        <ButtonLink to="/repositories/new">Connect a repository</ButtonLink>
+        <ButtonLink to="/home" variant="ghost">
+          Back to home
         </ButtonLink>
       </div>
     </div>

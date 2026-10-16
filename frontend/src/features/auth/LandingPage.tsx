@@ -10,11 +10,11 @@ import styles from "./LandingPage.module.css";
 const STEPS = [
   {
     title: "Connect a repository",
-    body: "Paste a GitHub link. RepoViva reads and indexes the code, usually in a few minutes.",
+    body: "Paste a GitHub link. RepoViva reads your code, usually in a few minutes.",
   },
   {
     title: "Talk it through",
-    body: "Answer six spoken questions about how your project works, with follow-ups on what you say.",
+    body: "Answer up to six spoken questions, each about a different part of your project.",
   },
   {
     title: "Learn from the report",

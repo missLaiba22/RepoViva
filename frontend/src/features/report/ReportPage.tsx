@@ -110,10 +110,8 @@ function ReportBody({ context }: { context: ReportContext }) {
           </ButtonLink>
         </div>
         <p className={styles.fine}>
-          Each answer is checked against the code its question was built from, by{" "}
-          {data.model?.replace(/^groq\//, "") ?? "an AI grader"}
-          {data.prompt_version && ` (prompt ${data.prompt_version})`}. It can miss things, so treat it as a study
-          guide, not a verdict.
+          This feedback is written by AI from your code. It can miss things, so treat it as a study guide, not a
+          verdict.
         </p>
       </footer>
     </>
@@ -143,7 +141,7 @@ function Failed({ interview, onRetried }: { interview: Interview; onRetried: (re
     try {
       onRetried(await retryReport(interview.id));
     } catch {
-      setError("Grading is unavailable right now. Please try again in a little while.");
+      setError("That didn't work either. Your answers are saved, so come back and try again later.");
       setRetrying(false);
     }
   }
@@ -152,8 +150,7 @@ function Failed({ interview, onRetried }: { interview: Interview; onRetried: (re
     <Card className={styles.state}>
       <h2 className={styles.stateTitle}>This report couldn&rsquo;t be finished</h2>
       <p className={styles.stateText}>
-        Grading stopped partway, most often because the grading service hit its daily limit. Your answers are saved,
-        so it can simply run again.
+        This is usually temporary. Your answers are saved, so you can try again now or come back later.
       </p>
       {error && (
         <p className={styles.error} role="alert">

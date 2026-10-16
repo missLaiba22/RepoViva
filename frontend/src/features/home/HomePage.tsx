@@ -26,16 +26,17 @@ export function HomePage() {
   // tab closed before connecting): not something the user did.
   const interviews = home.data.interviews.filter((i) => i.status !== "created");
   const hasReady = repositories.some((r) => r.status === "ready");
+  const lead = hasReady
+    ? "Pick a repository and talk through how it works. Each interview takes about 15 minutes."
+    : repositories.some((r) => isIndexing(r.status))
+      ? "We're reading your code. You can start an interview as soon as it's ready."
+      : "Connect a repository to get your first interview about your own code.";
 
   return (
     <div className={styles.page}>
       <header className={styles.intro}>
         <h1 className={styles.title}>Welcome back{user ? `, ${user.github_login}` : ""}</h1>
-        <p className={styles.lead}>
-          {hasReady
-            ? "Pick a repository and talk through how it works. Each interview is about 15 minutes."
-            : "Connect a repository to get your first interview about your own code."}
-        </p>
+        <p className={styles.lead}>{lead}</p>
       </header>
 
       <section className={styles.section} aria-labelledby="repos-heading">
@@ -54,7 +55,7 @@ export function HomePage() {
             title="Connect your first repository"
             action={<ButtonLink to="/repositories/new">Connect repository</ButtonLink>}
           >
-            Paste a link to a public GitHub repository. RepoViva indexes the code, then interviews you about it.
+            Paste a link to a public GitHub repository. RepoViva reads the code, then interviews you about it.
           </EmptyState>
         ) : (
           <RepositoryList repositories={repositories} />

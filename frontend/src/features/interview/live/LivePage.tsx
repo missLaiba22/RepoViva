@@ -9,7 +9,8 @@ import { useResource } from "../../../hooks/useResource";
 import { getPlan, retryPlan, type LiveHandoff } from "../api";
 import { LevelMeter } from "../LevelMeter";
 import { MicButton } from "./MicButton";
-import { MAX_ANSWER_SECONDS, MAX_TEXT_ANSWER, QUESTIONS_PER_INTERVIEW } from "./protocol";
+import type { Failure } from "./liveReducer";
+import { MAX_ANSWER_SECONDS, MAX_TEXT_ANSWER } from "./protocol";
 import { useLiveInterview, type LiveInterview } from "./useLiveInterview";
 import { useLevel } from "./useLevel";
 import styles from "./LivePage.module.css";
@@ -66,7 +67,7 @@ function PlanFailed({
     try {
       onRetried(await retryPlan(handoff.interviewId));
     } catch {
-      setError("Interview preparation is unavailable right now. Please try again in a little while.");
+      setError("That didn't work either. Wait a minute, then try again.");
       setRetrying(false);
     }
   }
@@ -76,8 +77,8 @@ function PlanFailed({
       <h1 className={styles.endTitle}>We couldn&rsquo;t prepare your interview</h1>
       <p className={styles.endText}>
         {retryable
-          ? "Writing the questions failed, most often because the question service is busy. Your code is fine, so it can simply run again."
-          : "We found no code in this repository to ask about."}
+          ? "This is usually temporary, and your repository is fine. Try again in a moment."
+          : "We couldn't find any code in this repository to ask about. Try a repository with source code in it."}
       </p>
       {error && (
         <p className={styles.notice} role="alert">
@@ -116,7 +117,7 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
   }, [active]);
 
   if (state.phase === "done") return <Finished handoff={handoff} answered={state.answered} outcome={state.outcome} />;
-  if (state.phase === "failed") return <Failed handoff={handoff} answered={state.answered} rejected={state.failure === "rejected"} />;
+  if (state.phase === "failed") return <Failed handoff={handoff} answered={state.answered} failure={state.failure} />;
 
   const showConfirm = confirmingEnd || blocker.state === "blocked";
   const questionNumber = Math.max(1, state.seq);
@@ -125,7 +126,6 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
     <div className={styles.room}>
       <header className={styles.top}>
         <span className={styles.repo}>{handoff.repositoryName}</span>
-        <Progress current={state.seq} answered={state.answered} />
         {state.phase !== "ending" && (
           <Button variant="ghost" onClick={() => setConfirmingEnd(true)}>
             End interview
@@ -137,11 +137,11 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
         {state.phase === "connecting" ? (
           <Waiting text="Connecting to your interviewer…" />
         ) : state.question === null ? (
-          <Waiting text="Reading your code and preparing the first question…" />
+          <Waiting text="Getting your first question ready…" />
         ) : (
           <>
             <p className={styles.counter}>
-              Question {questionNumber} of {QUESTIONS_PER_INTERVIEW}
+              Question {questionNumber}
             </p>
             <h1 className={styles.question} aria-live="polite">
               {state.question}
@@ -183,18 +183,6 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
         </div>
       )}
     </div>
-  );
-}
-
-function Progress({ current, answered }: { current: number; answered: number }) {
-  return (
-    <ol className={styles.progress} aria-label={`${answered} of ${QUESTIONS_PER_INTERVIEW} answered`}>
-      {Array.from({ length: QUESTIONS_PER_INTERVIEW }, (_, i) => {
-        const n = i + 1;
-        const tone = n <= answered ? styles.stepDone : n === current ? styles.stepNow : styles.stepLater;
-        return <li key={n} className={tone} />;
-      })}
-    </ol>
   );
 }
 
@@ -266,7 +254,7 @@ function AnswerArea({ live }: { live: LiveInterview }) {
               ? live.typing
                 ? "Sending your answer…"
                 : "Transcribing your answer…"
-              : "Thinking of the next question…"
+              : "Loading the next question…"
           }
         />
       </div>
@@ -383,8 +371,8 @@ function Finished({
       </p>
       <h1 className={styles.endTitle}>{outcome === "completed" ? "Interview complete" : "Interview ended"}</h1>
       <p className={styles.endText}>
-        You answered {answered} of {QUESTIONS_PER_INTERVIEW} questions. Your report is being prepared against your
-        code; it usually takes about a minute.
+        You answered {answered} {answered === 1 ? "question" : "questions"}. Your report will be ready in about a
+        minute.
       </p>
       <div className={styles.endActions}>
         <ButtonLink to={`/interviews/${handoff.interviewId}/report`} size="large">
@@ -398,16 +386,24 @@ function Finished({
   );
 }
 
-function Failed({ handoff, answered, rejected }: { handoff: LiveHandoff; answered: number; rejected: boolean }) {
+function Failed({ handoff, answered, failure }: { handoff: LiveHandoff; answered: number; failure: Failure | null }) {
+  const rejected = failure === "rejected";
+  const timeUp = failure === "time_limit";
+  const saved =
+    answered === 1 ? "Your answer is saved, and you'll get a report on it." : `Your ${answered} answers are saved, and you'll get a report on them.`;
   return (
     <div className={styles.endScreen}>
-      <h1 className={styles.endTitle}>{rejected ? "This interview session has expired" : "The interview was interrupted"}</h1>
+      <h1 className={styles.endTitle}>
+        {rejected ? "This interview has expired" : timeUp ? "Time's up" : "The interview was interrupted"}
+      </h1>
       <p className={styles.endText}>
         {rejected
-          ? "An interview has to start within 5 minutes of setting it up, and each session can only be used once."
-          : answered > 0
-            ? `The connection was lost. Your ${answered} answered ${answered === 1 ? "question is" : "questions are"} saved, and you'll get a report on them.`
-            : "The connection was lost before you answered a question."}
+          ? "Interviews need to start within a few minutes of setting them up. Start a new one; it only takes a moment."
+          : timeUp
+            ? `Interviews last up to 30 minutes.${answered > 0 ? ` ${saved}` : ""}`
+            : answered > 0
+              ? `The connection was lost. ${saved}`
+              : "The connection was lost before you answered a question. Start a new interview to try again."}
       </p>
       <div className={styles.endActions}>
         {!rejected && answered > 0 && (
@@ -435,8 +431,8 @@ function CannotResume({ interviewId }: { interviewId: number }) {
     <div className={styles.endScreen}>
       <h1 className={styles.endTitle}>This interview can&rsquo;t be reopened</h1>
       <p className={styles.endText}>
-        A live interview runs in the tab it started in. If it ended, its report is ready to read; otherwise start a
-        new one from your repository.
+        Interviews can&rsquo;t be resumed after leaving the page. If it finished, your report is waiting; otherwise
+        start a new one.
       </p>
       <div className={styles.endActions}>
         <ButtonLink to={`/interviews/${interviewId}/report`}>See the report</ButtonLink>
