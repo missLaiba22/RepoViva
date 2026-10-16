@@ -88,8 +88,12 @@ const HANDOFF = {
   deviceId: "mic-1",
 };
 
+function plan(plan_status: string, overrides: Record<string, unknown> = {}) {
+  return { interview_id: 21, plan_status, error_message: null, retryable: null, ...overrides };
+}
+
 async function startLive(handoff: object = HANDOFF) {
-  stubApi({ "GET /v1/me": { body: USER } });
+  stubApi({ "GET /v1/me": { body: USER }, "GET /v1/interviews/21/plan": { body: plan("ready") } });
   vi.stubGlobal("WebSocket", FakeSocket);
   const router = renderApp("/");
   await act(() => router.navigate("/interviews/21/live", { state: handoff }));
@@ -212,6 +216,37 @@ describe("live interview", () => {
       "href",
       "/repositories/15/interview",
     );
+  });
+
+  // Regression: the socket used to open at once, and Voice ended the session with plan_not_ready.
+  it("opens the socket only once the plan is ready", async () => {
+    const routes = { "GET /v1/me": { body: USER }, "GET /v1/interviews/21/plan": { body: plan("generating") } };
+    stubApi(routes);
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const router = renderApp("/");
+    await act(() => router.navigate("/interviews/21/live", { state: HANDOFF }));
+
+    expect(await screen.findByText(/we.re reading your code/i)).toBeInTheDocument();
+    expect(FakeSocket.instances).toHaveLength(0);
+
+    routes["GET /v1/interviews/21/plan"].body = plan("ready");
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1), { timeout: 3000 });
+  });
+
+  it("offers Try again when planning failed and can be retried", async () => {
+    const { calls } = stubApi({
+      "GET /v1/me": { body: USER },
+      "GET /v1/interviews/21/plan": { body: plan("failed", { error_message: "RateLimitError", retryable: true }) },
+      "POST /v1/interviews/21/plan/retry": { body: plan("generating") },
+    });
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const router = renderApp("/");
+    await act(() => router.navigate("/interviews/21/live", { state: HANDOFF }));
+
+    await userEvent.click(await screen.findByRole("button", { name: /try again/i }));
+    expect(calls).toContain("POST /v1/interviews/21/plan/retry");
+    expect(await screen.findByText(/we.re reading your code/i)).toBeInTheDocument();
+    expect(FakeSocket.instances).toHaveLength(0);
   });
 
   it("can't be reopened without the in-memory hand-off", async () => {

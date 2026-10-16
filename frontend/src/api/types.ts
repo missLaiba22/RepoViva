@@ -38,6 +38,15 @@ export interface InterviewCreated extends Interview {
   session_token_expires_at: string;
 }
 
+/** GET /v1/interviews/{id}/plan (decision 052): the question plan's status, never the questions. */
+export interface Plan {
+  interview_id: number;
+  plan_status: "generating" | "ready" | "failed";
+  error_message: string | null;
+  /** Only meaningful when `failed`: false means retrying can't help. */
+  retryable: boolean | null;
+}
+
 /** GET /v1/interviews/{id}/report (decisions 049, 050). Content fields are
  * null while `generating` and when `failed`. */
 export interface Report {

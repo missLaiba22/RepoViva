@@ -1,8 +1,12 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { useBlocker, useLocation, useParams } from "react-router-dom";
+import type { Plan } from "../../../api/types";
 import { Button, ButtonLink } from "../../../components/Button";
+import { ConnectionProblem } from "../../../components/ConnectionProblem";
 import { Spinner } from "../../../components/Spinner";
-import type { LiveHandoff } from "../api";
+import { usePolling } from "../../../hooks/usePolling";
+import { useResource } from "../../../hooks/useResource";
+import { getPlan, retryPlan, type LiveHandoff } from "../api";
 import { LevelMeter } from "../LevelMeter";
 import { MicButton } from "./MicButton";
 import { MAX_ANSWER_SECONDS, MAX_TEXT_ANSWER, QUESTIONS_PER_INTERVIEW } from "./protocol";
@@ -18,7 +22,80 @@ export function LivePage() {
   // The token only ever lives in router state, so a reload or a pasted
   // link can't rejoin. That's by design (decision 035).
   if (!handoff || handoff.interviewId !== id) return <CannotResume interviewId={id} />;
-  return <Live handoff={handoff} />;
+  return <PlanGate handoff={handoff} />;
+}
+
+const PLAN_POLL_MS = 2000;
+
+/** Opens the session only once the questions are written: Voice Service
+ * ends a session that starts earlier (decision 052). */
+function PlanGate({ handoff }: { handoff: LiveHandoff }) {
+  const load = useCallback(() => getPlan(handoff.interviewId), [handoff.interviewId]);
+  const plan = useResource(load);
+  const generating = plan.state === "loading" || (plan.state === "ready" && plan.data.plan_status === "generating");
+  usePolling(plan.reload, PLAN_POLL_MS, plan.state === "ready" && generating);
+
+  if (plan.state === "error") return <ConnectionProblem onRetry={plan.reload} />;
+  if (plan.state === "ready" && plan.data.plan_status === "ready") return <Live handoff={handoff} />;
+  if (plan.state === "ready" && plan.data.plan_status === "failed") {
+    return <PlanFailed handoff={handoff} retryable={plan.data.retryable === true} onRetried={plan.set} />;
+  }
+  return (
+    <div className={styles.endScreen}>
+      <Waiting text="Preparing your interview…" />
+      <p className={styles.endText}>We&rsquo;re reading your code and writing your questions. This takes a few seconds.</p>
+    </div>
+  );
+}
+
+function PlanFailed({
+  handoff,
+  retryable,
+  onRetried,
+}: {
+  handoff: LiveHandoff;
+  retryable: boolean;
+  onRetried: (plan: Plan) => void;
+}) {
+  const [retrying, setRetrying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleRetry() {
+    setRetrying(true);
+    setError(null);
+    try {
+      onRetried(await retryPlan(handoff.interviewId));
+    } catch {
+      setError("Interview preparation is unavailable right now. Please try again in a little while.");
+      setRetrying(false);
+    }
+  }
+
+  return (
+    <div className={styles.endScreen}>
+      <h1 className={styles.endTitle}>We couldn&rsquo;t prepare your interview</h1>
+      <p className={styles.endText}>
+        {retryable
+          ? "Writing the questions failed, most often because the question service is busy. Your code is fine, so it can simply run again."
+          : "We found no code in this repository to ask about."}
+      </p>
+      {error && (
+        <p className={styles.notice} role="alert">
+          {error}
+        </p>
+      )}
+      <div className={styles.endActions}>
+        {retryable && (
+          <Button onClick={handleRetry} disabled={retrying} size="large">
+            {retrying ? "Starting…" : "Try again"}
+          </Button>
+        )}
+        <ButtonLink to={`/repositories/${handoff.repositoryId}`} variant={retryable ? "ghost" : "primary"}>
+          Back to the repository
+        </ButtonLink>
+      </div>
+    </div>
+  );
 }
 
 const ACTIVE = new Set(["connecting", "preparing", "asking", "answering", "recording", "sending"]);
