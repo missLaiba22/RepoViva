@@ -91,7 +91,7 @@ Owns everything about a repository's code and its searchable representation:
 - Fetches the repository from GitHub
 - Parses, chunks, and embeds source code
 - Persists chunks + embeddings (pgvector) to the shared database
-- Exposes a retrieval endpoint used by Voice Service during interviews
+- Exposes the areas and retrieval endpoints Voice Service uses to plan interviews (decisions 052, 060)
 - Publishes ingestion progress as `ingestion.*` events, which Core API consumes (decisions 029, 057)
 
 Runs ingestion in a worker that consumes `ingestion-jobs`, separate from its API process. See "Data Flow" below.
@@ -101,10 +101,10 @@ Runs ingestion in a worker that consumes `ingestion-jobs`, separate from its API
 Owns the live interview session:
 
 - Terminates the WebSocket from the frontend and admits it by consuming the session token through Core API (decision 035)
-- Runs each turn: Repository Service lookup → LLM → TTS streamed to the client, then the candidate's audio → STT (decisions 043–045)
-- Persists each turn in its own `turns` table: the question when it's asked, the answer when it arrives (decision 040)
-- Publishes `interview.ended` with outcome `completed` or `interrupted` when a session ends (decisions 041, 057). An interruption still leaves a partial record because turns are already persisted
-- Plans each interview's questions in a worker that consumes `planning-jobs` (decision 052)
+- Plans each interview's questions in a worker that consumes `planning-jobs`: it gets the repository's areas, retrieves 2 chunks per area and writes the whole ordered plan in one LLM call, one scenario-based question per area (decisions 048, 052, 060)
+- Runs the live session from the stored plan: each question's audio is streamed to the client by TTS, then the candidate's audio goes to STT (decisions 043–045). There is no retrieval, no LLM call and no follow-up during the interview
+- Persists each interview as one MongoDB document in `interview_sessions`: the plan, with each question's answer and timings stored on it (decision 053)
+- Publishes `interview.ended` with outcome `completed` or `interrupted` when a session ends (decisions 041, 057). An interruption still leaves a partial record because answers are already persisted
 
 ### Evaluation Service
 
@@ -121,14 +121,18 @@ Kept separate so report generation (slow, rate-limited) does not compete with li
 
 ### PostgreSQL (shared, with pgvector)
 
-Single database, four schemas (one per service). Each service owns its own tables — no service reads or writes another service's tables directly. Cross-service data access goes through HTTP APIs.
+Single database, shared by Core API, Repository Service and Evaluation Service (decision 021, as amended by 053). Each service owns its own tables — no service reads or writes another service's tables directly. Cross-service data access goes through HTTP APIs.
+
+### MongoDB
+
+Voice Service's own store for interview sessions (decision 053). Locally a container in `docker-compose.yml`; in production MongoDB Atlas, chosen at deployment.
 
 ## Core Entities
 
 - **User** — the developer using RepoViva.
 - **Repository** — a GitHub repo the user has connected.
 - **Interview** — a mock interview session against a repository. Fields and lifecycle: decision 036.
-- **Turn** — one question and its answer, treated as a single unit.
+- **Turn** — one question and its answer, treated as a single unit. Stored as a question in the interview's session document (decision 053).
 - **Report** — the evaluation output at the end of an interview.
 
 Fields per entity are deferred until each service's implementation clarifies exactly what state it must hold.
@@ -188,7 +192,7 @@ These are called only by other services, never exposed to the frontend. HTTP cal
 Every message, job or event, is the same envelope:
 ```
 { message_id: <uuid>, type: string, occurred_at: <ISO 8601 UTC>,
-  request_id: string | null,   // decision 056; null until it ships
+  request_id: string | null,   // decision 056; null if the sender had none
   data: { ... } }              // the contract: a Pydantic model on each side
 ```
 
@@ -382,9 +386,10 @@ or the session failed mid-way, including an STT or TTS provider error).
    an `error_message` right away. Either way it returns 201 with the row.
 3. Repository Service's worker receives the job and claims an
    `ingestion_jobs` row (each claim of an `in_progress` row counts an
-   attempt). If the row is already `ready` or `failed`, it publishes that
-   outcome again and stops; if it has crashed twice, it marks it `failed`
-   and publishes `ingestion.failed` (decision 058). Otherwise it runs
+   attempt; a `failed` row restarts as attempt 1, decision 061). If the
+   row is already `ready`, it publishes that outcome again and stops; if
+   it has crashed twice, it marks it `failed` and publishes
+   `ingestion.failed` (decision 058). Otherwise it runs
    `run_ingestion(repository_id)`.
 4. The pipeline publishes `ingestion.started` → shallow-clones the repo
    into `workspace/<repository_id>/` → walks, chunks, and embeds the
@@ -402,6 +407,9 @@ or the session failed mid-way, including an STT or TTS provider error).
 6. Client polls `GET /v1/repositories/{id}` to observe the current
    status: `queued → in_progress → ready`, or `→ failed` with
    `error_message`.
+7. For a `failed` repository, `POST /v1/repositories/{id}/retry` moves the
+   row back to `queued` with one conditional `UPDATE` and sends the job
+   again (decision 061).
 
 Chunking uses CocoIndex's syntax-aware `RecursiveSplitter`; embedding
 is Voyage `voyage-4-lite` via CocoIndex's LiteLLM integration
@@ -411,16 +419,16 @@ see decision 031 for why that split exists and what it fixed.
 
 ### Interview session (live, over WebSocket)
 
-1. Client calls `POST /v1/interviews` on Core API (allowed only if repo status is `ready`). Core API creates the interview and returns a session token.
+1. Client calls `POST /v1/interviews` on Core API (allowed only if repo status is `ready`). Core API creates the interview, sends a `plan.requested` job and returns a session token. The live page polls `GET /v1/interviews/{id}/plan`, shows "Preparing your interview…", and opens the WebSocket once the plan is `ready` (decision 052).
 2. Client opens a WebSocket to Voice Service and sends the session token in its first message, `session.start` — not in the URL, which is commonly logged (decision 035).
-3. Voice Service consumes the token via Core API's `/internal/v1/session-tokens/consume`. This happens once per session; it also moves the interview to `active` and returns its `repository_id`. Voice Service then replies `session.ready`.
-4. **Opening turn:** retrieve with the fixed seed query (decision 042) → generate the question with Groq (decisions 034, 038) → insert the turn as `asked` → send `question.text` → stream the question's audio from Deepgram as binary frames, then `question.audio_end` (decision 044).
-5. The user answers. The client streams microphone audio as binary frames and sends `audio.end` when the user stops. Voice Service compresses the buffered audio to MP3 (decision 047) and transcribes it with Groq Whisper, using the question as prompt (decision 043), sends `transcript.final`, records the answer (turn → `answered`) and sends `turn.complete`. Silence or an over-long answer gets an `error` and the turn waits for another try.
-6. **Follow-up turns:** retrieve with the previous question plus the answer, excluding every chunk already used → generate with the full history → ask. Repeat until `MAX_QUESTIONS` (default 6) or the client sends `session.end`.
-7. On session end, Voice Service publishes `interview.ended` with outcome `completed` (budget reached or user stopped) or `interrupted` (disconnect or error) (decisions 036, 041, 057). Core API's worker ends the interview and Evaluation's worker starts the report (see below).
+3. Voice Service consumes the token via Core API's `/internal/v1/session-tokens/consume`. This happens once per session; it also moves the interview to `active` and returns its `repository_id`. Voice Service then loads the plan: if it isn't ready it sends `plan_not_ready` and closes 1008, otherwise it replies `session.ready` with `question_count` (decision 062).
+4. **Each question:** mark the next planned question `asked` → send `question.text` → stream its audio from Deepgram as binary frames, then `question.audio_end` (decision 044).
+5. The user answers. The client streams microphone audio as binary frames and sends `audio.end` when the user stops. Voice Service compresses the buffered audio to MP3 (decision 047) and transcribes it with Groq Whisper, using the question as prompt (decision 043), sends `transcript.final`, records the answer (question → `answered`) and sends `turn.complete`. Silence or an over-long answer gets an `error` and the turn waits for another try.
+6. **Next question:** no retrieval and no LLM call; Voice Service asks the next question in the plan. Repeat until the plan is done or the client sends `session.end`. There are no follow-up questions (decision 052).
+7. On session end, Voice Service publishes `interview.ended` with outcome `completed` (plan finished or user stopped) or `interrupted` (disconnect, error or the 30-minute limit) (decisions 036, 041, 057). Core API's worker ends the interview and Evaluation's worker starts the report (see below).
 8. If Voice crashes or the event is lost, the interview stays `active` only until the user next reads it after `ACTIVE_SESSION_CUTOFF_SECONDS` (default 2100, above Voice's 30-minute session limit): Core API then ends it `interrupted`, and the first report read starts the report through the usual 404 recovery (decision 059).
 
-Each turn's `timings` records `retrieval_ms`, `llm_ms`, `tts_first_byte_ms`, `tts_ms` and `stt_ms`, and the same values are logged. Together they cover decision 006's latency path, from the end of the user's speech (STT) to the next question's audio starting (retrieval, LLM, TTS first byte).
+Each question's `timings` records `tts_first_byte_ms`, `tts_ms` and `stt_ms`, and the same values are logged. Retrieval and the LLM call happen once, at planning time, so decision 006's latency path is now STT plus the next question's TTS first byte.
 
 ### Report generation (decisions 049–051)
 
@@ -450,16 +458,16 @@ Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row 
     when."* DDL lives in `repository-service/sql/schema.sql`,
     applied idempotently by `db.apply_schema()` at service startup —
     not by CocoIndex, which only writes rows to the table.
-  - Voice Service schema: `turns`, one row per question and answer
-    (decision 040). It records `retrieved_chunk_ids` and per-stage
-    `timings`, and has no foreign key to `interviews`. DDL lives in
-    `voice-service/sql/schema.sql` and is applied at startup. *Also in
-    `public` for now, like `code_chunks`.*
   - Evaluation Service schema: `reports`, one row per interview
     (`interview_id` UNIQUE, no foreign key), with `status`, `partial`,
     `model`, `prompt_version`, and `summary` and `turn_evaluations` as
     JSONB (decisions 049, 050). DDL in `evaluation-service/sql/schema.sql`,
     applied at startup.
+- **MongoDB** — Voice Service's `interview_sessions`, one document per
+  interview: `plan_status`, and the ordered questions with their
+  `chunk_ids`, answer, status and `timings` (decision 053).
+  `GET /internal/v1/interviews/{id}/turns` serves it in the shape
+  Evaluation Service expects.
 - **No raw audio storage** — audio is discarded after transcription.
  
 
@@ -469,7 +477,7 @@ Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row 
 - Target scale: ~10 concurrent active interviews.
 - Interview turn latency target: 4–5s p95 (aspirational 3s). Inter-service network hops eat some of this budget — see decisions 006 and 020.
 - Ingestion target for small repos (<100 files): under 1 minute p95.
-- Voice pipeline is DIY over a WebSocket; Voice Service orchestrates each stage (STT, retrieval, LLM, TTS) itself.
+- Voice pipeline is DIY over a WebSocket; Voice Service orchestrates STT and TTS itself. Questions are planned before the session, so retrieval and the LLM are not on the live path (decision 052).
 - User isolation is enforced at the data-access layer in Core API via a `get_current_user` dependency on protected routes, and at the service layer via queries always scoped by `owner_user_id`. `/health` and auth endpoints are the only unauthenticated routes.
 - OAuth tokens are encrypted at the application layer (Core API). Everything else relies on disk-level encryption.
 - Shared database across services with strict per-service table ownership (see decision 021).
@@ -478,62 +486,8 @@ Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row 
 - Internal service-to-service HTTP calls are authenticated with HMAC-SHA256 over `timestamp + "." + body`, with a 60-second freshness window and a single shared secret (see decision 027). All services use the shared `libs/repoviva-common` package for signing, verification and the `verify_hmac` dependency (decision 054); it holds infrastructure only, never domain code.
 - Each service makes all outbound HTTP calls through one long-lived httpx client opened in its lifespan (decision 055): `AsyncClient` in the async services, `Client` in Core API, whose routes are sync.
 - Ingestion status is observable end to end (decisions 029, 057): Repository Service publishes `ingestion.started`/`completed`/`failed`, Core API's worker applies a loose state machine, and `GET /v1/repositories/{id}` shows the current state. Events are retried by SQS and land eventually; they are not deduplicated by `message_id`, because every consumer is idempotent without it. Every ingestion ends `ready` or `failed` (decision 058): a job that crashes twice is failed on its next delivery, and a lost final event is published again on redelivery. Only Core API's own handler failing three times leaves a row stuck, in its DLQ.
+- Every service puts `[request_id]` in every log line and forwards `X-Request-ID` on every outbound call; messages carry it as `request_id` (decision 056). One Voice WebSocket is one interview, so one ID follows an interview through all four services.
 - Core API's Alembic autogenerate manages only tables with a Core API model (`include_object` hook, decision 037); other services' tables in the shared database are invisible to it.
-
-## Decided, not yet implemented
-
-Everything above describes the system as it runs today. The changes below
-are decided but not built. When each one ships, move it into the sections
-above and delete it here.
-
-**Pre-generated question plan (decision 052, supersedes 034).**
-- Built: Core API sends the `plan.requested` job on `POST /v1/interviews`
-  and proxies the plan status and retry; Voice Service's worker plans
-  (decision 057, see API Surface). Not built: the live page below.
-- Voice Service gets the repository's areas (directories with chunk counts)
-  from a new Repository Service endpoint,
-  `GET /internal/v1/repositories/{id}/areas` (built, see above). It retrieves 2 chunks per area,
-  for at most `MAX_QUESTIONS` areas, using `filename_prefix`, and writes the
-  whole ordered plan in one LLM call, one question per area. Repository
-  Service splits the largest areas until there are `MAX_QUESTIONS` or
-  nothing more splits (decision 060). Questions are scenario-based and never
-  name code (decision 048's rules, now in the planning prompt).
-- `plan_status` (`generating` / `ready` / `failed`) lives only in Voice
-  Service. The setup page is unchanged: Start creates the interview and
-  triggers planning. The live page shows "Preparing your interview…", polls
-  the status through Core API, and opens the WebSocket when the plan is
-  `ready`. On a transient failure, planning is retried once automatically,
-  then a "Try again" button is shown. Decision 036's interview states are
-  unchanged.
-- During the interview there is no retrieval and no LLM call: Voice Service
-  asks each planned question in order, stores the answer, and moves on.
-  There are no follow-up questions.
-- The interview-session data flow's steps 4 and 6 change accordingly, and
-  Voice Service no longer calls Repository Service during the interview.
-
-**Interview sessions in MongoDB (decision 053, supersedes 040).**
-- Voice Service stores one document per interview in a MongoDB collection,
-  `interview_sessions`: the plan, with each question's answer and timings
-  stored on it. The `turns` table and
-  Voice Service's Postgres pool are removed.
-- `GET /internal/v1/interviews/{id}/turns` keeps its response shape, so
-  Evaluation Service doesn't change.
-- Local development adds a MongoDB container to `docker-compose.yml`.
-  Production uses MongoDB Atlas, chosen at deployment.
-- After this, Postgres is shared by Core API, Repository Service and
-  Evaluation Service only (decision 021, as amended).
-
-**Request IDs across services (decision 056).**
-- `repoviva_common/request_id.py` adds a middleware to every service: each
-  HTTP request and WebSocket connection gets an `X-Request-ID` (read from
-  the caller or generated), held in a context variable and returned in the
-  response.
-- The shared HTTP client forwards the ID on every outbound call.
-- One `configure_logging()` puts `[request_id]` in every log line and
-  replaces each service's own logging setup; Core API gets logging for the
-  first time.
-- One Voice WebSocket connection is one interview, so a single ID follows
-  an interview through all four services.
 
 ## Future Evolution
 
