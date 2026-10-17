@@ -5,7 +5,7 @@ No HTTP concerns here — no HTTPException, no FastAPI imports. Callers
 Python return values or None, and translate to HTTP status codes themselves.
 """
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from core_api.repositories.models import Repository, RepositoryStatus
@@ -67,6 +67,24 @@ def get_repository_for_user(
         Repository.owner_user_id == owner_user_id,
     )
     return db.scalars(stmt).one_or_none()
+
+
+def restart_failed_ingestion(db: Session, *, repository_id: int) -> bool:
+    """Move a `failed` repository back to `queued` (decision 061).
+
+    One conditional UPDATE, so two retries can't both restart it. False if
+    the repository isn't `failed`.
+    """
+    result = db.execute(
+        update(Repository)
+        .where(
+            Repository.id == repository_id,
+            Repository.status == RepositoryStatus.FAILED.value,
+        )
+        .values(status=RepositoryStatus.QUEUED.value, error_message=None)
+    )
+    db.commit()
+    return result.rowcount == 1
 
 
 def list_repositories_for_user(

@@ -4,7 +4,7 @@ All endpoints require an authenticated session. Ownership is enforced
 by the service layer — the router just supplies the current user's ID.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from core_api.auth.dependencies import get_current_user
@@ -14,7 +14,7 @@ from core_api.repositories.ingestion_client import (
     IngestionTriggerError,
     trigger_ingestion,
 )
-from core_api.repositories.models import RepositoryStatus
+from core_api.repositories.models import Repository, RepositoryStatus
 from core_api.repositories.schemas import RepositoryCreate, RepositoryResponse
 from core_api.users.models import User
 
@@ -68,8 +68,47 @@ def create_repository(
         github_url=payload.github_url,
     )
 
-    # Send the ingestion job. If that fails, mark the row `failed` now: rolling
-    # it back or leaving it stuck in `queued` is worse (decisions 028, 057).
+    _send_ingestion(db, repo)
+    return RepositoryResponse.model_validate(repo)
+
+
+@router.post(
+    "/{repository_id}/retry",
+    response_model=RepositoryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        200: {"description": "Repository isn't failed; returned as is"},
+        404: {"description": "Repository not found"},
+    },
+)
+def retry_repository(
+    repository_id: int,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RepositoryResponse:
+    """"Try again" for a failed repository (decision 061).
+
+    A `failed` repository goes back to `queued` and its ingestion job is
+    sent again. Any other repository is returned as is.
+    """
+    repo = service.get_repository_for_user(
+        db, repository_id=repository_id, owner_user_id=current_user.id
+    )
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
+    restarted = service.restart_failed_ingestion(db, repository_id=repo.id)
+    db.refresh(repo)
+    if not restarted:
+        response.status_code = status.HTTP_200_OK
+        return RepositoryResponse.model_validate(repo)
+    _send_ingestion(db, repo)
+    return RepositoryResponse.model_validate(repo)
+
+
+def _send_ingestion(db: Session, repo: Repository) -> None:
+    # If the job can't be sent, mark the row `failed` now: rolling it back or
+    # leaving it stuck in `queued` is worse (decisions 028, 057).
     try:
         trigger_ingestion(repository_id=repo.id, github_url=repo.github_url)
     except IngestionTriggerError as exc:
@@ -77,8 +116,6 @@ def create_repository(
         repo.error_message = f"could not start ingestion: {exc}"
         db.commit()
         db.refresh(repo)
-
-    return RepositoryResponse.model_validate(repo)
 
 
 @router.get("", response_model=list[RepositoryResponse])
