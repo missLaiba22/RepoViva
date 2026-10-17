@@ -150,6 +150,9 @@ Repositories
 POST /v1/repositories            body: { github_url }  → Repository (status=queued or failed)
 GET  /v1/repositories            list current user's repos
 GET  /v1/repositories/{id}       single repo, including ingestion status
+POST /v1/repositories/{id}/retry a failed repo goes back to `queued` and its ingestion
+                                 job is sent again: 202; any other repo is returned as
+                                 is: 200; 404 if missing or not yours (decision 061)
 ```
 
 Interviews
@@ -341,7 +344,7 @@ Client → Server
   session.end    {}                 user stops early → counts as completed (decision 041)
 
 Server → Client
-  session.ready       { interview_id }
+  session.ready       { interview_id, question_count }   the plan's length (decision 062)
   question.text       { seq, text }   sent before the audio, as captions
   <binary>                             question audio: PCM16 LE, 24 kHz, mono
   question.audio_end  { seq }          all audio sent; the client may open the mic
@@ -539,7 +542,6 @@ Open decisions that will shape architecture:
 - Choice of managed Postgres provider (Supabase or Neon)
 - Full data model (fields per entity, per-service schemas)
 - Streaming STT (live captions, server-side end-of-speech detection) and barge-in (decisions 043, 045)
-- Retry semantics for failed ingestions (retry-in-place vs new row)
 - Logout endpoint (deferred — no state to clean up server-side, so it's a cookie-clear + redirect when needed)
 - Whether to migrate from signed cookies to JWTs if the session payload grows
 - Naming convention on `Base.metadata` to stop Alembic autogenerate from re-detecting constraint drift on every run (small cleanup after slice 2)

@@ -3057,3 +3057,79 @@ question per area.
 **Revisit when:**
 Questions on split areas overlap or feel too narrow, or small areas give
 weak questions: add a minimum area size, or share questions by size.
+
+## 061 — Retry a failed repository in place
+
+*Status: decided and implemented 2026-10-16. Resolves the open question
+"retry semantics for failed ingestions".*
+
+**Context:**
+A failed repository was a dead end. Reconnecting the same link returns
+the existing row with 409, and Repository Service treated `failed` as
+terminal, so a re-sent job did nothing. A user who fixed the cause (for
+example, made the repository public), or who hit a failure on our side,
+could only connect a different repository.
+
+**Decision:**
+- **Core API** adds `POST /v1/repositories/{id}/retry`. A `failed` row
+  moves to `queued` with its `error_message` cleared (one conditional
+  `UPDATE`, so two retries can't both restart it) and the
+  `ingestion.requested` job is sent again: 202. Any other repository is
+  returned as is: 200. 404 if it isn't yours. If the job can't be sent,
+  the row is `failed` again, as on create.
+- **Repository Service's claim** restarts a `failed` job as a fresh first
+  attempt (`in_progress`, attempts 1, error cleared), as `claim_plan`
+  restarts a failed plan (decision 052). An `in_progress` job still
+  counts another attempt, and a `ready` job is left alone.
+- **Frontend:** a failed repository's page offers **Try again**, except
+  when it is too large, because retrying can't help.
+
+**Options considered:**
+- **Reconnecting the link restarts a failed repository.** No new endpoint,
+  but a create that sometimes restarts work is surprising, and the 409
+  contract changes meaning.
+- **Delete the failed row and reconnect.** Needs a delete flow (still an
+  open cross-service question) and loses the history.
+
+**Tradeoff:**
+- A new public endpoint and a new `failed → queued` transition, made by
+  Core API itself, not by an event.
+- A redelivered job for a `failed` repository now runs again instead of
+  only republishing its outcome (decision 058). It still ends with an
+  outcome event, so a lost `ingestion.failed` is still never final.
+- A late duplicate `ingestion.failed` from the earlier attempt can mark a
+  retried repository failed again. Rare, and the user can retry again.
+- "Too large" is recognised in the frontend from the error text, the same
+  way the page already maps failures to plain words.
+
+**Revisit when:**
+Failures need a stored, structured reason (then send `retryable` with
+`ingestion.failed`, as plans do), or repositories can be deleted.
+
+## 062 — The live page knows how many questions there are
+
+*Status: decided and implemented 2026-10-16. Amends the WebSocket
+protocol (decision 053).*
+
+**Context:**
+Since decision 060 an interview has up to `MAX_QUESTIONS` questions, and
+the page didn't know how many, so it could only show "Question 2".
+
+**Decision:**
+`session.ready` gains `question_count`, the plan's length. Voice Service
+has the plan loaded when it sends the message. The page shows
+"Question N of M", progress dots, and "You answered N of M questions".
+
+**Options considered:**
+- **`question_count` on the plan status** (`GET /v1/interviews/{id}/plan`).
+  Changes Voice's internal response, Core API's schema and the frontend,
+  and the page doesn't need the number before the session opens.
+- **`total` on every `question.text`.** Repeats one value per question.
+
+**Tradeoff:**
+- The WebSocket contract changes. The field is optional on the page, so
+  without it the page falls back to "Question N".
+
+**Revisit when:**
+The number of questions can change during a session.
+
