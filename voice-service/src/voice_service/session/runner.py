@@ -148,7 +148,7 @@ class InterviewSession:
             plan = await self._sessions.load_plan(session.interview_id)
             if plan is None:
                 raise _PlanNotReadyError
-            await ws.send_json(protocol.session_ready(session.interview_id))
+            await ws.send_json(protocol.session_ready(session.interview_id, len(plan)))
             outcome = await self._interview_within_limit(ws, session.interview_id, plan)
         except _PlanNotReadyError:
             # Only the token tells us the interview, so this check can only

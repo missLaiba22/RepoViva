@@ -56,8 +56,9 @@ def parse_client_message(raw: str) -> ClientMessage:
 # is identified by its `seq` in the plan (decision 053).
 
 
-def session_ready(interview_id: int) -> dict[str, Any]:
-    return {"type": "session.ready", "interview_id": interview_id}
+def session_ready(interview_id: int, question_count: int) -> dict[str, Any]:
+    # question_count: the plan's length, for "Question N of M" (decision 062).
+    return {"type": "session.ready", "interview_id": interview_id, "question_count": question_count}
 
 
 def question_text(seq: int, text: str) -> dict[str, Any]:

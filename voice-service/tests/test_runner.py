@@ -173,6 +173,7 @@ async def test_full_interview_plays_the_plan_in_order():
         "session.ready", "question.text", "question.audio_end", "turn.complete",
         "question.text", "question.audio_end", "turn.complete", "session.end",
     ]
+    assert ws.sent[0] == {"type": "session.ready", "interview_id": 7, "question_count": 2}
     assert [m["text"] for m in ws.sent if m["type"] == "question.text"] == ["Q1?", "Q2?"]
     assert ws.sent[-1]["reason"] == "completed"
     assert ws.closed == (1000, None)
