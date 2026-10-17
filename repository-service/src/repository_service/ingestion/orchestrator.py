@@ -4,8 +4,9 @@ Called by the worker for each `ingestion.requested` job (decision 057).
 Publishes status events at each stage boundary (decisions 026, 057).
 Pipeline errors are caught and reported as `ingestion.failed`; only a crash
 leaves the job `in_progress`, so the redelivered message reruns it, up to
-`MAX_ATTEMPTS`. A redelivered finished job publishes its outcome again, so a
-lost final event is never final (decision 058).
+`MAX_ATTEMPTS`. A redelivered `ready` job publishes its outcome again, so a
+lost final event is never final (decision 058); a `failed` one is restarted
+by its claim and runs again (decision 061).
 """
 
 from __future__ import annotations

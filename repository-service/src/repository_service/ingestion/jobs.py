@@ -28,12 +28,16 @@ class IngestionJob:
     error_message: str | None = None
 
 
+# A `failed` job restarts as a fresh first attempt: Core API only re-sends
+# the job when the user retries (decision 061).
 _CLAIM = """
 INSERT INTO ingestion_jobs (repository_id, github_url, status)
 VALUES ($1, $2, 'in_progress')
 ON CONFLICT (repository_id) DO UPDATE
-SET attempts = ingestion_jobs.attempts + 1, updated_at = now()
-WHERE ingestion_jobs.status = 'in_progress'
+SET attempts = CASE WHEN ingestion_jobs.status = 'failed' THEN 1
+                    ELSE ingestion_jobs.attempts + 1 END,
+    status = 'in_progress', error_message = NULL, updated_at = now()
+WHERE ingestion_jobs.status IN ('in_progress', 'failed')
 """
 
 _GET = """
@@ -48,7 +52,8 @@ WHERE repository_id = $1
 
 
 async def claim(pool: asyncpg.Pool, *, repository_id: str, github_url: str) -> None:
-    """Create the job row, or count another attempt if it is still in progress."""
+    """Create the job row, count another attempt if it is in progress, or
+    restart it if it failed. A `ready` job is left alone."""
     async with pool.acquire() as conn:
         await conn.execute(_CLAIM, repository_id, github_url)
 
