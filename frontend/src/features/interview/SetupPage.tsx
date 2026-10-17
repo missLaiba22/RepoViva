@@ -1,13 +1,19 @@
-import { useCallback, useId, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useCallback, useId, useState, type ReactNode } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import type { Repository } from "../../api/types";
 import { Button, ButtonLink } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { ConnectionProblem } from "../../components/ConnectionProblem";
 import { EmptyState } from "../../components/EmptyState";
+import { Facts } from "../../components/Facts";
+import { Icon } from "../../components/Icon";
+import { PageHeader } from "../../components/PageHeader";
+import { RepoName } from "../../components/RepoName";
 import { PageSpinner, Spinner } from "../../components/Spinner";
 import { useResource } from "../../hooks/useResource";
+import { REPOSITORIES_CRUMB } from "../../lib/crumbs";
+import { INTERVIEW_FACTS } from "../../lib/interviewFacts";
 import { repoName } from "../../lib/format";
 import { getRepository } from "../repositories";
 import { micSupported, playTestSound, type MicErrorKind } from "./audio/microphone";
@@ -25,7 +31,7 @@ export function SetupPage() {
   if (repo.state === "error") {
     if (repo.error instanceof ApiError && (repo.error.status === 404 || repo.error.status === 422)) {
       return (
-        <EmptyState title="Repository not found" action={<ButtonLink to="/home">Back to home</ButtonLink>}>
+        <EmptyState title="Repository not found" action={<ButtonLink to="/repositories">Back to repositories</ButtonLink>}>
           It may have been removed, or it belongs to another account.
         </EmptyState>
       );
@@ -38,7 +44,7 @@ export function SetupPage() {
         title="This repository isn't ready yet"
         action={<ButtonLink to={`/repositories/${id}`}>See progress</ButtonLink>}
       >
-        Interviews open once we&rsquo;ve finished reading your code, usually within a few minutes.
+        ItInterviews open once we&rsquo;ve finished reading your code, usually within a few minutes.rsquo;s still being prepared, usually for a few minutes.
       </EmptyState>
     );
   }
@@ -52,7 +58,7 @@ function Setup({ repository }: { repository: Repository }) {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const typeId = useId();
-  const { owner, name } = repoName(repository.github_url);
+  const { name } = repoName(repository.github_url);
 
   const micReady = check.state === "live" && check.heard;
   const canStart = (mode === "text" || micReady) && !starting;
@@ -86,47 +92,35 @@ function Setup({ repository }: { repository: Repository }) {
 
   return (
     <div className={styles.page}>
-      <Link to={`/repositories/${repository.id}`} className={styles.back}>
-        ← {name}
-      </Link>
+      <PageHeader
+        crumbs={[REPOSITORIES_CRUMB, { label: name, to: `/repositories/${repository.id}` }]}
+        title="Before you start"
+        lead={<RepoName githubUrl={repository.github_url} />}
+      />
 
-      <header>
-        <h1 className={styles.title}>Before you start</h1>
-        <p className={styles.lead}>
-          An interview about{" "}
-          <span className={styles.repo}>
-            {owner && <span className={styles.owner}>{owner}/</span>}
-            {name}
-          </span>
-          . Find a quiet spot; it takes about 15 minutes.
-        </p>
-      </header>
-
-      <ol className={styles.expect} aria-label="What to expect">
-        <li>
-          <strong>Up to six questions about how your project works,</strong> each on a different part of it, read
-          aloud and shown on screen.
-        </li>
-        <li>
-          <strong>Tap the microphone to answer, and tap again when you&rsquo;re done.</strong> There&rsquo;s no
-          rush: pauses are fine, up to 3 minutes per answer.
-        </li>
-        <li>
-          <strong>Stop whenever you like.</strong> You still get a report on the questions you answered.
-        </li>
-      </ol>
+      <Facts items={INTERVIEW_FACTS} label="What to expect" />
 
       <Card className={styles.card}>
-        <div className={styles.cardHead}>
-          <h2 className={styles.cardTitle}>Microphone</h2>
-          {mode === "voice" && micReady && <span className={styles.ok}>✓ We can hear you</span>}
+        <div className={styles.row}>
+          <span className={styles.rowIcon}>
+            <Icon name="mic" />
+          </span>
+          {mode === "text" ? (
+            <div className={styles.rowMain}>
+              <h2 className={styles.rowTitle}>Microphone</h2>
+              <p className={styles.muted}>Off. You&rsquo;ll type your answers.</p>
+            </div>
+          ) : (
+            <MicPanel check={check} onStart={start} />
+          )}
         </div>
 
-        {mode === "text" ? (
-          <p className={styles.muted}>You&rsquo;ll type your answers. The questions are still read aloud.</p>
-        ) : (
-          <MicPanel check={check} onStart={start} />
-        )}
+        <div className={styles.row}>
+          <span className={styles.rowIcon}>
+            <Icon name="speaker" />
+          </span>
+          <SpeakerPanel />
+        </div>
 
         {micSupported() && (
           <label htmlFor={typeId} className={styles.toggle}>
@@ -145,13 +139,6 @@ function Setup({ repository }: { repository: Repository }) {
         )}
       </Card>
 
-      <Card className={styles.card}>
-        <div className={styles.cardHead}>
-          <h2 className={styles.cardTitle}>Speakers</h2>
-        </div>
-        <SpeakerPanel />
-      </Card>
-
       <div className={styles.footer}>
         {startError && (
           <p className={styles.error} role="alert">
@@ -168,9 +155,7 @@ function Setup({ repository }: { repository: Repository }) {
             </span>
           )}
         </div>
-        <p className={styles.privacy}>
-          Your answers are turned into text for your report. Recordings are never kept.
-        </p>
+        <p className={styles.privacy}>Answers are transcribed for your report. Recordings are never kept.</p>
       </div>
     </div>
   );
@@ -200,40 +185,61 @@ function MicPanel({ check, onStart }: { check: ReturnType<typeof useMicCheck>["c
 
   if (check.state === "idle") {
     return (
-      <div className={styles.panel}>
-        <p className={styles.muted}>RepoViva needs your microphone to hear your answers.</p>
-        <div>
-          <Button onClick={() => onStart()}>Check my microphone</Button>
-        </div>
-      </div>
+      <RowBody title="Microphone" hint="Needed to hear your answers.">
+        <Button variant="secondary" onClick={() => onStart()}>
+          Check my microphone
+        </Button>
+      </RowBody>
     );
   }
 
   if (check.state === "requesting") {
     return (
-      <p className={styles.waiting}>
-        <Spinner label="Waiting for permission" /> Waiting for you to allow the microphone…
-      </p>
+      <RowBody
+        title="Microphone"
+        hint={
+          <span className={styles.waiting}>
+            <Spinner label="Waiting for permission" /> Allow the microphone in your browser…
+          </span>
+        }
+      />
     );
   }
 
   if (check.state === "error") {
     const { title, body } = MIC_ERRORS[check.kind];
     return (
-      <div className={styles.panel} role="alert">
-        <p className={styles.problemTitle}>{title}</p>
-        <p className={styles.muted}>{body}</p>
-        <div>
+      <div className={styles.rowMain} role="alert">
+        <div className={styles.rowHead}>
+          <div>
+            <h2 className={styles.rowTitle}>Microphone</h2>
+            <p className={styles.problemTitle}>{title}</p>
+          </div>
           <Button variant="secondary" onClick={() => onStart()}>
             Try again
           </Button>
         </div>
+        <p className={styles.muted}>{body}</p>
       </div>
     );
   }
 
   return (
-    <div className={styles.panel}>
+    <div className={styles.rowMain}>
+      <div className={styles.rowHead}>
+        <div>
+          <h2 className={styles.rowTitle}>Microphone</h2>
+          <p className={check.heard ? styles.ok : styles.muted} aria-live="polite">
+            {check.heard ? (
+              <>
+                <Icon name="check" size={14} /> We can hear you
+              </>
+            ) : (
+              "Say a few words, as if answering."
+            )}
+          </p>
+        </div>
+      </div>
       {check.devices.length > 1 && (
         <div className={styles.field}>
           <label htmlFor={selectId} className={styles.fieldLabel}>
@@ -254,9 +260,6 @@ function MicPanel({ check, onStart }: { check: ReturnType<typeof useMicCheck>["c
         </div>
       )}
       <LevelMeter level={check.level} />
-      <p className={styles.muted} aria-live="polite">
-        {check.heard ? "Sounds good. You're ready." : "Say a few words, as if you were answering a question."}
-      </p>
     </div>
   );
 }
@@ -274,12 +277,24 @@ function SpeakerPanel() {
   }
 
   return (
-    <div className={styles.panel}>
-      <p className={styles.muted}>Questions are spoken aloud. Make sure you can hear this at a comfortable volume.</p>
-      <div>
-        <Button variant="secondary" onClick={handlePlay} disabled={playing}>
-          {playing ? "Playing…" : "Play test sound"}
-        </Button>
+    <RowBody title="Speakers" hint="Questions are read aloud.">
+      <Button variant="secondary" onClick={handlePlay} disabled={playing}>
+        <Icon name="play" size={14} />
+        {playing ? "Playing…" : "Play test sound"}
+      </Button>
+    </RowBody>
+  );
+}
+
+function RowBody({ title, hint, children }: { title: string; hint: ReactNode; children?: ReactNode }) {
+  return (
+    <div className={styles.rowMain}>
+      <div className={styles.rowHead}>
+        <div>
+          <h2 className={styles.rowTitle}>{title}</h2>
+          <p className={styles.muted}>{hint}</p>
+        </div>
+        {children}
       </div>
     </div>
   );

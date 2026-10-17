@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type Resource<T> =
+type Resource<T> =
   | { state: "loading" }
   | { state: "error"; error: Error }
   | { state: "ready"; data: T };

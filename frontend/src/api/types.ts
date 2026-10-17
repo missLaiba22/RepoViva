@@ -18,7 +18,7 @@ export interface Repository {
   updated_at: string;
 }
 
-export type InterviewStatus = "created" | "active" | "completed" | "interrupted";
+type InterviewStatus = "created" | "active" | "completed" | "interrupted";
 
 export interface Interview {
   id: number;
@@ -81,7 +81,7 @@ export interface Source {
   end_line: number;
 }
 
-export interface Score {
+interface Score {
   score: number;
   justification: string;
 }

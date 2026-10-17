@@ -1,72 +1,105 @@
-.list {
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.row {
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  transition: border-color 120ms ease;
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+.head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
-}
-
-.row + .row {
-  border-top: 1px solid var(--border);
-}
-
-.main {
-  min-width: 0;
-}
-
-.titleLine {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--space-3);
 }
 
 .name {
-  overflow-wrap: anywhere;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
   font-weight: 600;
   text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
 .name:hover {
   color: var(--primary);
-  text-decoration: underline;
 }
 
-.owner {
+.repoIcon {
+  flex-shrink: 0;
   color: var(--text-muted);
-  font-weight: 400;
 }
 
-.meta,
-.error {
+.path {
   margin-top: var(--space-1);
-  font-size: var(--text-sm);
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .meta {
+  margin-top: var(--space-1);
   color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 
-.error {
+.foot {
+  margin-top: auto;
+  padding-top: var(--space-4);
+}
+
+.preparing {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 2.5rem;
+  align-content: center;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.failed {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.problem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   color: var(--danger);
+  font-size: var(--text-sm);
 }
 
-.action {
+.problem svg {
   flex-shrink: 0;
 }
 
-@media (max-width: 560px) {
-  .row {
-    flex-direction: column;
-    align-items: stretch;
-  }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }

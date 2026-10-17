@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react";
+import { StrictMode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { vi } from "vitest";
 import { router } from "../src/app/router";
@@ -22,13 +23,14 @@ export function stubApi(routes: Route) {
 }
 
 /** The real route table in memory, starting at `path`. */
-export function renderApp(path: string) {
+export function renderApp(path: string, { strict = false }: { strict?: boolean } = {}) {
   const memory = createMemoryRouter(router.routes, { initialEntries: [path] });
-  render(
+  const app = (
     <AuthProvider>
       <RouterProvider router={memory} />
-    </AuthProvider>,
+    </AuthProvider>
   );
+  render(strict ? <StrictMode>{app}</StrictMode> : app);
   return memory;
 }
 

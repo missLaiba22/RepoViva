@@ -1,0 +1,11 @@
+.repo {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.owner {
+  color: var(--text-muted);
+  font-weight: 400;
+}

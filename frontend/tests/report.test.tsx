@@ -68,6 +68,7 @@ describe("report", () => {
 
     expect(await screen.findByText("2.5")).toBeInTheDocument();
     expect(screen.getByText("2.7")).toBeInTheDocument();
+    expect(screen.getByText("2.6")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "What went well" })).toBeInTheDocument();
     expect(screen.getByText("Named the canonical lock order.")).toBeInTheDocument();
     expect(screen.getByText(/reserved stock when a session expires/)).toBeInTheDocument();
@@ -81,8 +82,10 @@ describe("report", () => {
     api(READY);
     renderApp("/interviews/10/report");
 
-    const list = await screen.findByRole("list", { name: "Questions" });
-    const [graded, unanswered] = within(list).getAllByRole("listitem").filter((li) => li.parentElement === list);
+    // 4 and 3 out of 5: not both 4+, so it's one to revisit.
+    const revisit = await screen.findByRole("list", { name: "Answers to revisit" });
+    const [graded] = within(revisit).getAllByRole("listitem").filter((li) => li.parentElement === revisit);
+    expect(screen.queryByRole("list", { name: "Strong answers" })).toBeNull();
 
     await userEvent.click(within(graded).getByText(/why does checkout sort/i));
     expect(within(graded).getByText("So two checkouts lock rows in the same order.")).toBeVisible();
@@ -95,6 +98,7 @@ describe("report", () => {
       "https://github.com/missLaiba22/ecommerce-api/blob/HEAD/backend/app/modules/orders/service.py#L12-L40",
     );
 
+    const unanswered = screen.getByRole("list", { name: "Not reached" });
     expect(within(unanswered).getByText(/not answered/i)).toBeInTheDocument();
   });
 
@@ -137,7 +141,7 @@ describe("report", () => {
     renderApp("/interviews/10/report");
 
     expect(await screen.findByText(/no answers were graded/i)).toBeInTheDocument();
-    expect(screen.getAllByText("–")).toHaveLength(2);
+    expect(screen.getAllByText("–")).toHaveLength(3);
   });
 
   it("doesn't ask for a report before the interview has ended", async () => {

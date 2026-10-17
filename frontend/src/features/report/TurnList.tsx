@@ -4,9 +4,9 @@ import { SourceList } from "./SourceChip";
 import styles from "./TurnList.module.css";
 
 /** One expandable row per question, in interview order. */
-export function TurnList({ turns, githubUrl }: { turns: TurnEvaluation[]; githubUrl: string }) {
+export function TurnList({ turns, githubUrl, label }: { turns: TurnEvaluation[]; githubUrl: string; label: string }) {
   return (
-    <ol className={styles.list} aria-label="Questions">
+    <ol className={styles.list} aria-label={label}>
       {turns.map((turn) => (
         <li key={turn.seq}>
           <Turn turn={turn} githubUrl={githubUrl} />
@@ -24,7 +24,7 @@ function Turn({ turn, githubUrl }: { turn: TurnEvaluation; githubUrl: string }) 
           <span className={styles.seq}>Q{turn.seq}</span>
           <div className={styles.headMain}>
             <p className={styles.question}>{turn.question}</p>
-            <p className={styles.meta}>Not answered: the interview ended before this question.</p>
+            <p className={styles.meta}>Not answered</p>
           </div>
         </div>
       </div>
@@ -37,15 +37,18 @@ function Turn({ turn, githubUrl }: { turn: TurnEvaluation; githubUrl: string }) 
         <span className={styles.seq}>Q{turn.seq}</span>
         <div className={styles.headMain}>
           <p className={styles.question}>{turn.question}</p>
-          <p className={styles.meta}>
-            {turn.status === "graded" ? (
-              <>
-                Correctness <strong>{turn.correctness.score}</strong> · Clarity <strong>{turn.clarity.score}</strong>
-              </>
-            ) : (
-              "Couldn't be graded"
-            )}
-          </p>
+          {turn.status === "graded" ? (
+            <p className={styles.pills}>
+              <span className={styles.pill}>
+                Correctness <strong>{turn.correctness.score}</strong>
+              </span>
+              <span className={styles.pill}>
+                Clarity <strong>{turn.clarity.score}</strong>
+              </span>
+            </p>
+          ) : (
+            <p className={styles.meta}>Couldn&rsquo;t be graded</p>
+          )}
         </div>
         <span className={styles.chevron} aria-hidden="true" />
       </summary>
@@ -58,7 +61,7 @@ function Turn({ turn, githubUrl }: { turn: TurnEvaluation; githubUrl: string }) 
 
         {turn.status === "not_graded" ? (
           <p className={styles.meta}>
-            We couldn&rsquo;t score this answer, so it isn&rsquo;t counted in your averages.
+            Not scored, so not counted in your averages.
           </p>
         ) : (
           <>

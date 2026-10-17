@@ -20,7 +20,7 @@ describe("sign-in", () => {
     expect(router.state.location.pathname).toBe("/");
   });
 
-  it("sends a signed-in user from the landing page to /home", async () => {
+  it("sends a signed-in user from the landing page to their repositories", async () => {
     stubApi({
       "GET /v1/me": { body: USER },
       "GET /v1/repositories": { body: [] },
@@ -28,8 +28,9 @@ describe("sign-in", () => {
     });
     const router = renderApp("/");
 
-    await screen.findByRole("heading", { name: /welcome back, missLaiba22/i });
-    expect(router.state.location.pathname).toBe("/home");
+    await screen.findByRole("heading", { name: "Repositories" });
+    expect(screen.getByRole("button", { name: "Account: missLaiba22" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/repositories");
   });
 
   it("offers a retry when Core API can't be reached", async () => {
@@ -46,8 +47,8 @@ describe("sign-in", () => {
       "GET /v1/interviews": { body: [] },
       "POST /v1/auth/github/logout": { status: 204 },
     });
-    const router = renderApp("/home");
-    await screen.findByRole("heading", { name: /welcome back/i });
+    const router = renderApp("/repositories");
+    await screen.findByRole("heading", { name: "Repositories" });
 
     // After logout, /v1/me answers 401.
     api.fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -56,7 +57,8 @@ describe("sign-in", () => {
         ? new Response(null, { status: 204 })
         : new Response("{}", { status: 401 });
     });
-    await userEvent.click(screen.getByRole("button", { name: /sign out/i }));
+    await userEvent.click(screen.getByRole("button", { name: /account/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /sign out/i }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
     expect(api.calls).toContain("POST /v1/auth/github/logout");

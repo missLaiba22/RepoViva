@@ -2,10 +2,10 @@ import type { RepositoryStatus } from "../../api/types";
 import styles from "./StatusChip.module.css";
 
 const LABELS: Record<RepositoryStatus, string> = {
-  queued: "Waiting",
-  in_progress: "Reading code",
-  ready: "Ready",
-  failed: "Couldn't prepare",
+  queued: "Preparing",
+  in_progress: "Preparing",
+  ready: "Ready to practice",
+  failed: "Import failed",
 };
 
 export function StatusChip({ status }: { status: RepositoryStatus }) {

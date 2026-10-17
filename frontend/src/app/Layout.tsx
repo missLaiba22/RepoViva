@@ -1,41 +1,34 @@
-import { useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
-import { Button } from "../components/Button";
+import { NavLink, Outlet } from "react-router-dom";
+import { ButtonLink } from "../components/Button";
+import { Icon } from "../components/Icon";
 import { Logo } from "../components/Logo";
-import { ThemeToggle } from "../components/ThemeToggle";
-import { useAuth } from "../features/auth";
+import { AccountMenu } from "./AccountMenu";
+import { SidebarRepositories } from "./SidebarRepositories";
 import styles from "./Layout.module.css";
 
-/** The signed-in shell: header and a centred content column. */
+const linkClass = (active: boolean) => (active ? `${styles.link} ${styles.active}` : styles.link);
+
+/** The signed-in shell: a sidebar for moving between sections, and the page. */
 export function Layout() {
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
-  const [signingOut, setSigningOut] = useState(false);
-
-  async function handleSignOut() {
-    setSigningOut(true);
-    try {
-      await signOut();
-      navigate("/", { replace: true });
-    } finally {
-      setSigningOut(false);
-    }
-  }
-
   return (
     <div className={styles.shell}>
-      <header className={styles.header}>
-        <div className={styles.bar}>
-          <Logo to="/home" />
-          <div className={styles.right}>
-            {user && <span className={styles.user}>{user.github_login}</span>}
-            <ThemeToggle />
-            <Button variant="ghost" onClick={handleSignOut} disabled={signingOut}>
-              Sign out
-            </Button>
-          </div>
+      <aside className={styles.sidebar}>
+        <Logo to="/repositories" />
+        <ButtonLink to="/repositories/new" variant="secondary" className={styles.connect}>
+          <Icon name="plus" size={16} />
+          Connect repository
+        </ButtonLink>
+        <nav className={styles.nav} aria-label="Main">
+          <SidebarRepositories linkClass={linkClass} />
+          <NavLink to="/interviews" className={({ isActive }) => linkClass(isActive)}>
+            <Icon name="report" size={18} />
+            Reports
+          </NavLink>
+        </nav>
+        <div className={styles.account}>
+          <AccountMenu />
         </div>
-      </header>
+      </aside>
       <main className={styles.main}>
         <Outlet />
       </main>

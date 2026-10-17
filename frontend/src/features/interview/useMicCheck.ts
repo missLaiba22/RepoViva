@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MicError, listMicrophones, openMicrophone, type MicErrorKind, type MicSession } from "./audio/microphone";
 
-export type MicCheck =
+type MicCheck =
   | { state: "idle" }
   | { state: "requesting" }
   | { state: "error"; kind: MicErrorKind }

@@ -155,6 +155,15 @@ describe("live interview", () => {
     expect(screen.getByText("Question 2")).toBeInTheDocument();
   });
 
+  it("shows the question count once session.ready gives it", async () => {
+    const { ws } = await startLive();
+    act(() => ws.push({ type: "session.ready", interview_id: 21, question_count: 4 }));
+
+    await askQuestion(ws, 1, "Why does checkout sort items before locking?");
+    expect(screen.getByText("Question 1 of 4")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "0 of 4 answered" })).toBeInTheDocument();
+  });
+
   it("lets the user try again after no speech", async () => {
     const { ws } = await startLive();
     act(() => ws.push({ type: "session.ready", interview_id: 21 }));
@@ -233,6 +242,22 @@ describe("live interview", () => {
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(1), { timeout: 3000 });
   });
 
+  // Regression: StrictMode's discarded socket reported its close, so the page showed "interrupted" at once.
+  it("ignores the close of a discarded socket under StrictMode", async () => {
+    stubApi({ "GET /v1/me": { body: USER }, "GET /v1/interviews/21/plan": { body: plan("ready") } });
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const router = renderApp("/", { strict: true });
+    await act(() => router.navigate("/interviews/21/live", { state: HANDOFF }));
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
+    const ws = FakeSocket.instances[1];
+    act(() => ws.open());
+    act(() => ws.push({ type: "session.ready", interview_id: 21 }));
+
+    await askQuestion(ws, 1, "Why does checkout sort items before locking?");
+    expect(screen.queryByText(/interrupted/i)).not.toBeInTheDocument();
+    expect(FakeSocket.instances[0].json()).toEqual([]);
+  });
+
   it("offers Try again when planning failed and can be retried", async () => {
     const { calls } = stubApi({
       "GET /v1/me": { body: USER },
@@ -265,7 +290,7 @@ describe("live interview", () => {
     act(() => ws.push({ type: "session.end", reason: "completed" }));
     await screen.findByRole("heading", { name: /interview complete/i });
 
-    await act(() => router.navigate("/home"));
+    await act(() => router.navigate("/repositories"));
     expect(ws.readyState).toBe(3);
     expect(audio.closed).toBe(1);
   });

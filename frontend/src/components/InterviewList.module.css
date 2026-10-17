@@ -34,6 +34,11 @@
   overflow-wrap: anywhere;
 }
 
+.date {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
 .outcome {
   font-size: var(--text-xs);
   font-weight: 600;
@@ -55,6 +60,10 @@
 
 .muted {
   color: var(--text-muted);
+}
+
+.meta:empty {
+  display: none;
 }
 
 .meta {

@@ -21,7 +21,7 @@ describe("connect repository", () => {
     expect(JSON.parse(post[1]!.body as string)).toEqual({
       github_url: "https://github.com/missLaiba22/ecommerce-api",
     });
-    expect(await screen.findByRole("heading", { name: /waiting to start/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /preparing your repository/i })).toBeInTheDocument();
   });
 
   it("explains an invalid link without calling the API", async () => {
@@ -83,26 +83,45 @@ describe("repository page", () => {
       "GET /v1/repositories/15": { body: repository({ status: "in_progress" }) },
     });
     renderApp("/repositories/15");
-    expect(await screen.findByRole("heading", { name: /reading your code/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /preparing your repository/i })).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
 
     api.fetchMock.mockImplementation(async () => new Response(JSON.stringify(repository()), { status: 200 }));
     await act(() => vi.advanceTimersByTimeAsync(2100));
 
-    expect(await screen.findByRole("heading", { name: /ready for an interview/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /ready to practice/i })).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
-  it("explains a failed repository in plain words, without the raw error", async () => {
+  it("explains a failed repository in plain words, with the raw error behind Details", async () => {
     stubApi({
       "GET /v1/me": { body: USER },
       "GET /v1/repositories/17": { body: repository({ id: 17, status: "failed", error_message: "repository too large: 9,000 chunks (limit 6,000)" }) },
     });
     renderApp("/repositories/17");
 
-    expect(await screen.findByRole("heading", { name: /too large/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /couldn't prepare this repository/i })).toBeInTheDocument();
+    expect(screen.getByText(/too large/i)).toBeInTheDocument();
     expect(screen.queryByText(/chunks/)).toBeNull();
-    expect(screen.getByRole("link", { name: /connect a repository/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
+    expect(screen.getByRole("link", { name: /connect a different repository/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByText(/9,000 chunks/)).toBeInTheDocument();
+  });
+
+  it("tries a failed repository again in place", async () => {
+    const { calls } = stubApi({
+      "GET /v1/me": { body: USER },
+      "GET /v1/repositories/17": { body: repository({ id: 17, status: "failed", error_message: "fetch failed: x" }) },
+      "POST /v1/repositories/17/retry": { status: 202, body: repository({ id: 17, status: "queued" }) },
+    });
+    renderApp("/repositories/17");
+
+    await userEvent.click(await screen.findByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByRole("heading", { name: /preparing your repository/i })).toBeInTheDocument();
+    expect(calls).toContain("POST /v1/repositories/17/retry");
   });
 
   it("says not found for someone else's or a missing repository", async () => {

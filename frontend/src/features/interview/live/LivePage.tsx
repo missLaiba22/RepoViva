@@ -3,6 +3,8 @@ import { useBlocker, useLocation, useParams } from "react-router-dom";
 import type { Plan } from "../../../api/types";
 import { Button, ButtonLink } from "../../../components/Button";
 import { ConnectionProblem } from "../../../components/ConnectionProblem";
+import { ErrorDetails } from "../../../components/ErrorDetails";
+import { Icon } from "../../../components/Icon";
 import { Spinner } from "../../../components/Spinner";
 import { usePolling } from "../../../hooks/usePolling";
 import { useResource } from "../../../hooks/useResource";
@@ -39,12 +41,19 @@ function PlanGate({ handoff }: { handoff: LiveHandoff }) {
   if (plan.state === "error") return <ConnectionProblem onRetry={plan.reload} />;
   if (plan.state === "ready" && plan.data.plan_status === "ready") return <Live handoff={handoff} />;
   if (plan.state === "ready" && plan.data.plan_status === "failed") {
-    return <PlanFailed handoff={handoff} retryable={plan.data.retryable === true} onRetried={plan.set} />;
+    return (
+      <PlanFailed
+        handoff={handoff}
+        retryable={plan.data.retryable === true}
+        errorMessage={plan.data.error_message}
+        onRetried={plan.set}
+      />
+    );
   }
   return (
     <div className={styles.endScreen}>
       <Waiting text="Preparing your interview…" />
-      <p className={styles.endText}>We&rsquo;re reading your code and writing your questions. This takes a few seconds.</p>
+      <p className={styles.endText}>We&rsquo;re reading your code and writing your questions.</p>
     </div>
   );
 }
@@ -52,10 +61,12 @@ function PlanGate({ handoff }: { handoff: LiveHandoff }) {
 function PlanFailed({
   handoff,
   retryable,
+  errorMessage,
   onRetried,
 }: {
   handoff: LiveHandoff;
   retryable: boolean;
+  errorMessage: string | null;
   onRetried: (plan: Plan) => void;
 }) {
   const [retrying, setRetrying] = useState(false);
@@ -77,8 +88,8 @@ function PlanFailed({
       <h1 className={styles.endTitle}>We couldn&rsquo;t prepare your interview</h1>
       <p className={styles.endText}>
         {retryable
-          ? "This is usually temporary, and your repository is fine. Try again in a moment."
-          : "We couldn't find any code in this repository to ask about. Try a repository with source code in it."}
+          ? "This is usually temporary. Try again in a moment."
+          : "We couldn't find any code in this repository to ask about."}
       </p>
       {error && (
         <p className={styles.notice} role="alert">
@@ -94,6 +105,7 @@ function PlanFailed({
         <ButtonLink to={`/repositories/${handoff.repositoryId}`} variant={retryable ? "ghost" : "primary"}>
           Back to the repository
         </ButtonLink>
+        {errorMessage && <ErrorDetails technical={errorMessage} />}
       </div>
     </div>
   );
@@ -116,7 +128,9 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [active]);
 
-  if (state.phase === "done") return <Finished handoff={handoff} answered={state.answered} outcome={state.outcome} />;
+  if (state.phase === "done") {
+    return <Finished handoff={handoff} answered={state.answered} total={state.total} outcome={state.outcome} />;
+  }
   if (state.phase === "failed") return <Failed handoff={handoff} answered={state.answered} failure={state.failure} />;
 
   const showConfirm = confirmingEnd || blocker.state === "blocked";
@@ -126,6 +140,7 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
     <div className={styles.room}>
       <header className={styles.top}>
         <span className={styles.repo}>{handoff.repositoryName}</span>
+        {state.total ? <Progress current={state.seq} answered={state.answered} total={state.total} /> : <span />}
         {state.phase !== "ending" && (
           <Button variant="ghost" onClick={() => setConfirmingEnd(true)}>
             End interview
@@ -142,6 +157,7 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
           <>
             <p className={styles.counter}>
               Question {questionNumber}
+              {state.total ? ` of ${state.total}` : ""}
             </p>
             <h1 className={styles.question} aria-live="polite">
               {state.question}
@@ -186,6 +202,18 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
   );
 }
 
+function Progress({ current, answered, total }: { current: number; answered: number; total: number }) {
+  return (
+    <ol className={styles.progress} aria-label={`${answered} of ${total} answered`}>
+      {Array.from({ length: total }, (_, i) => {
+        const n = i + 1;
+        const tone = n <= answered ? styles.stepDone : n === current ? styles.stepNow : styles.stepLater;
+        return <li key={n} className={tone} />;
+      })}
+    </ol>
+  );
+}
+
 function Waiting({ text }: { text: string }) {
   return (
     <div className={styles.waiting} role="status">
@@ -200,8 +228,10 @@ function QuestionAudio({ live }: { live: LiveInterview }) {
   if (live.audioBlocked) {
     return (
       <div className={styles.audioRow}>
-        <Button onClick={live.unblockAudio}>▶ Play the question</Button>
-        <span className={styles.muted}>Your browser needs a tap before it plays sound.</span>
+        <Button onClick={live.unblockAudio}>
+          <Icon name="play" size={16} />
+          Play the question
+        </Button>
       </div>
     );
   }
@@ -226,7 +256,8 @@ function QuestionAudio({ live }: { live: LiveInterview }) {
     return (
       <div className={styles.audioRow}>
         <Button variant="ghost" onClick={live.replay}>
-          ↻ Hear the question again
+          <Icon name="replay" size={16} />
+          Hear it again
         </Button>
       </div>
     );
@@ -297,18 +328,23 @@ function SpokenAnswer({ live }: { live: LiveInterview }) {
         onClick={recording ? live.stopRecording : live.startRecording}
       />
       <p className={styles.micLabel} aria-live="polite">
-        {recording
-          ? "Listening. Tap when you're done."
-          : state.phase === "answering"
-            ? "Tap to answer"
-            : "The mic opens when the question finishes"}
+        {recording ? (
+          <span className={styles.listening}>
+            <span className={styles.recDot} aria-hidden="true" />
+            Listening
+          </span>
+        ) : state.phase === "answering" ? (
+          "Tap to answer"
+        ) : (
+          "The mic opens after the question"
+        )}
       </p>
       {recording && (
         <div className={styles.recordingInfo}>
           <LevelMeter level={level} label="Your voice" />
           <p className={remaining <= 20 ? styles.timerLow : styles.timer}>
             {formatSeconds(live.recordingSeconds)}
-            {remaining <= 20 && ` · ${remaining}s left`}
+            {remaining <= 20 ? ` · ${remaining}s left` : " · tap to finish"}
           </p>
         </div>
       )}
@@ -358,28 +394,28 @@ function TypedAnswer({ live, enabled }: { live: LiveInterview; enabled: boolean 
 function Finished({
   handoff,
   answered,
+  total,
   outcome,
 }: {
   handoff: LiveHandoff;
   answered: number;
+  total: number | null;
   outcome: LiveInterview["state"]["outcome"];
 }) {
+  const count = total ? `${answered} of ${total} questions` : `${answered} ${answered === 1 ? "question" : "questions"}`;
   return (
     <div className={styles.endScreen}>
       <p className={styles.endMark} aria-hidden="true">
-        ✓
+        <Icon name="check" size={22} />
       </p>
       <h1 className={styles.endTitle}>{outcome === "completed" ? "Interview complete" : "Interview ended"}</h1>
-      <p className={styles.endText}>
-        You answered {answered} {answered === 1 ? "question" : "questions"}. Your report will be ready in about a
-        minute.
-      </p>
+      <p className={styles.endText}>You answered {count}. Your report is ready in about a minute.</p>
       <div className={styles.endActions}>
         <ButtonLink to={`/interviews/${handoff.interviewId}/report`} size="large">
           See your report
         </ButtonLink>
-        <ButtonLink to="/home" variant="ghost">
-          Back to home
+        <ButtonLink to="/repositories" variant="ghost">
+          Back to repositories
         </ButtonLink>
       </div>
     </div>
@@ -398,12 +434,12 @@ function Failed({ handoff, answered, failure }: { handoff: LiveHandoff; answered
       </h1>
       <p className={styles.endText}>
         {rejected
-          ? "Interviews need to start within a few minutes of setting them up. Start a new one; it only takes a moment."
+          ? "Interviews must start within a few minutes of setup. Start a new one."
           : timeUp
             ? `Interviews last up to 30 minutes.${answered > 0 ? ` ${saved}` : ""}`
             : answered > 0
               ? `The connection was lost. ${saved}`
-              : "The connection was lost before you answered a question. Start a new interview to try again."}
+              : "The connection was lost before your first answer."}
       </p>
       <div className={styles.endActions}>
         {!rejected && answered > 0 && (
@@ -418,8 +454,8 @@ function Failed({ handoff, answered, failure }: { handoff: LiveHandoff; answered
         >
           Start a new interview
         </ButtonLink>
-        <ButtonLink to="/home" variant="ghost">
-          Back to home
+        <ButtonLink to="/repositories" variant="ghost">
+          Back to repositories
         </ButtonLink>
       </div>
     </div>
@@ -431,13 +467,12 @@ function CannotResume({ interviewId }: { interviewId: number }) {
     <div className={styles.endScreen}>
       <h1 className={styles.endTitle}>This interview can&rsquo;t be reopened</h1>
       <p className={styles.endText}>
-        Interviews can&rsquo;t be resumed after leaving the page. If it finished, your report is waiting; otherwise
-        start a new one.
+        Interviews can&rsquo;t be resumed after leaving the page. If it finished, your report is ready.
       </p>
       <div className={styles.endActions}>
         <ButtonLink to={`/interviews/${interviewId}/report`}>See the report</ButtonLink>
-        <ButtonLink to="/home" variant="secondary">
-          Back to home
+        <ButtonLink to="/repositories" variant="secondary">
+          Back to repositories
         </ButtonLink>
       </div>
     </div>

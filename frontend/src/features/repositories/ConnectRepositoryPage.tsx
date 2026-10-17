@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { Button, ButtonLink } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { PageHeader } from "../../components/PageHeader";
+import { REPOSITORIES_CRUMB } from "../../lib/crumbs";
 import { connectRepository } from "./api";
 import { normalizeGithubUrl } from "./githubUrl";
 import styles from "./ConnectRepositoryPage.module.css";
@@ -45,10 +47,11 @@ export function ConnectRepositoryPage() {
 
   return (
     <div className={styles.page}>
-      <header>
-        <h1 className={styles.title}>Connect a repository</h1>
-        <p className={styles.lead}>Every interview question will be about this project.</p>
-      </header>
+      <PageHeader
+        crumbs={[REPOSITORIES_CRUMB]}
+        title="Connect a repository"
+        lead="Every question will be about this code. Preparing it takes a few minutes."
+      />
 
       <Card className={styles.card}>
         <form onSubmit={handleSubmit} noValidate>
@@ -89,23 +92,13 @@ export function ConnectRepositoryPage() {
             <Button type="submit" disabled={submitting}>
               {submitting ? "Connecting…" : "Connect repository"}
             </Button>
-            <ButtonLink to="/home" variant="ghost">
+            <ButtonLink to="/repositories" variant="ghost">
               Cancel
             </ButtonLink>
           </div>
         </form>
       </Card>
 
-      <section className={styles.next} aria-labelledby="next-heading">
-        <h2 id="next-heading" className={styles.nextTitle}>
-          What happens next
-        </h2>
-        <ol className={styles.steps}>
-          <li>RepoViva reads your code. This usually takes a few minutes.</li>
-          <li>You can leave the page while it works. It shows as ready on your home page.</li>
-          <li>Then start an interview whenever you like.</li>
-        </ol>
-      </section>
     </div>
   );
 }

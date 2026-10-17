@@ -1,5 +1,6 @@
 import { Navigate } from "react-router-dom";
 import { ButtonAnchor } from "../../components/Button";
+import { Icon, type IconName } from "../../components/Icon";
 import { Logo } from "../../components/Logo";
 import { PageSpinner } from "../../components/Spinner";
 import { ThemeToggle } from "../../components/ThemeToggle";
@@ -7,25 +8,16 @@ import { SIGN_IN_URL } from "./api";
 import { useAuth } from "./authContext";
 import styles from "./LandingPage.module.css";
 
-const STEPS = [
-  {
-    title: "Connect a repository",
-    body: "Paste a GitHub link. RepoViva reads your code, usually in a few minutes.",
-  },
-  {
-    title: "Talk it through",
-    body: "Answer up to six spoken questions, each about a different part of your project.",
-  },
-  {
-    title: "Learn from the report",
-    body: "Each answer is checked against your code, with the points a strong answer covers and the files to revisit.",
-  },
+const STEPS: { icon: IconName; label: string }[] = [
+  { icon: "repo", label: "Connect a repository" },
+  { icon: "mic", label: "Answer out loud" },
+  { icon: "report", label: "Review the report" },
 ];
 
 export function LandingPage() {
   const auth = useAuth();
   if (auth.status === "loading") return <PageSpinner />;
-  if (auth.status === "signed-in") return <Navigate to="/home" replace />;
+  if (auth.status === "signed-in") return <Navigate to="/repositories" replace />;
 
   return (
     <div className={styles.page}>
@@ -34,35 +26,64 @@ export function LandingPage() {
         <ThemeToggle />
       </header>
 
-      <main>
+      <main className={styles.main}>
         <section className={styles.hero}>
-          <p className={styles.eyebrow}>Mock interviews about your own code</p>
           <h1 className={styles.title}>Practise explaining the code you actually wrote.</h1>
-          <p className={styles.lead}>
-            RepoViva studies your repository, interviews you about it out loud, and shows you where your explanation
-            matched the code and where it didn&rsquo;t.
-          </p>
+          <p className={styles.lead}>Spoken mock interviews about your own GitHub repository, graded against the code.</p>
           <div className={styles.actions}>
             <ButtonAnchor href={SIGN_IN_URL} size="large">
               <GitHubMark />
               Sign in with GitHub
             </ButtonAnchor>
-            <span className={styles.note}>Public repositories only, for now.</span>
+            <span className={styles.note}>Public repositories</span>
           </div>
+          <ol className={styles.steps} aria-label="How it works">
+            {STEPS.map((step) => (
+              <li key={step.label}>
+                <Icon name={step.icon} size={16} />
+                {step.label}
+              </li>
+            ))}
+          </ol>
         </section>
 
-        <ol className={styles.steps} aria-label="How it works">
-          {STEPS.map((step) => (
-            <li key={step.title} className={styles.step}>
-              <h2 className={styles.stepTitle}>{step.title}</h2>
-              <p className={styles.stepBody}>{step.body}</p>
-            </li>
-          ))}
-        </ol>
+        <InterviewPreview />
       </main>
-
-      <footer className={styles.footer}>RepoViva · interview practice for developers</footer>
     </div>
+  );
+}
+
+/** A still of the live interview screen: shows the product instead of describing it. */
+function InterviewPreview() {
+  return (
+    <figure className={styles.preview} aria-label="Preview of a live interview">
+      <div className={styles.previewTop}>
+        <span className={styles.previewRepo}>acme/checkout-api</span>
+        <span className={styles.previewSteps} aria-hidden="true">
+          <i className={styles.done} />
+          <i className={styles.now} />
+          <i />
+          <i />
+        </span>
+      </div>
+      <div className={styles.previewBody}>
+        <p className={styles.previewCounter}>Question 2 of 4</p>
+        <p className={styles.previewQuestion}>
+          Why does <code>place_order</code> lock the stock rows in product order?
+        </p>
+        <div className={styles.previewMic}>
+          <span className={styles.previewButton}>
+            <Icon name="mic" size={22} />
+          </span>
+          <span className={styles.previewWave} aria-hidden="true">
+            {[40, 70, 55, 90, 60, 35, 75, 50, 30].map((h, i) => (
+              <i key={i} style={{ height: `${h}%` }} />
+            ))}
+          </span>
+          <span className={styles.previewLabel}>Listening · 0:42</span>
+        </div>
+      </div>
+    </figure>
   );
 }
 

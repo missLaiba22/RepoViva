@@ -8,7 +8,7 @@ import { CLOSE_REJECTED, type ServerMessage } from "./protocol";
  *        │                     preparing ←turn.complete─ sending ←┘
  *   any ─session.end→ done        any ─close / internal_error→ failed
  */
-export type Phase =
+type Phase =
   | "connecting" // socket opening, token being checked
   | "preparing" // waiting for the next question (retrieval + LLM)
   | "asking" // question shown, its audio streaming or playing
@@ -24,6 +24,8 @@ export type Failure = "rejected" | "lost" | "internal" | "time_limit";
 export interface LiveState {
   phase: Phase;
   seq: number;
+  /** How many questions the interview has; null until session.ready says. */
+  total: number | null;
   turnId: number | null;
   question: string | null;
   /** The question's audio has fully arrived (question.audio_end). */
@@ -48,6 +50,7 @@ export type LiveEvent =
 export const initialLiveState: LiveState = {
   phase: "connecting",
   seq: 0,
+  total: null,
   turnId: null,
   question: null,
   audioComplete: false,
@@ -102,7 +105,9 @@ export function liveReducer(state: LiveState, event: LiveEvent): LiveState {
 function onServer(state: LiveState, msg: ServerMessage): LiveState {
   switch (msg.type) {
     case "session.ready":
-      return state.phase === "connecting" ? { ...state, phase: "preparing" } : state;
+      return state.phase === "connecting"
+        ? { ...state, phase: "preparing", total: msg.question_count ?? null }
+        : state;
 
     case "question.text":
       if (state.phase === "ending") return { ...state, seq: msg.seq };

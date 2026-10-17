@@ -107,6 +107,9 @@ export function useLiveInterview(handoff: LiveHandoff): LiveInterview {
     }
 
     return () => {
+      // A discarded socket (StrictMode's first one) must not report its
+      // close: it shares the reducer with the live socket.
+      ws.onopen = ws.onmessage = ws.onclose = null;
       // Closing an open socket mid-interview makes it `interrupted`, with a
       // partial report (decision 041).
       if (!closed) ws.close(1000);

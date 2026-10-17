@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type Theme = "light" | "dark";
+type Theme = "light" | "dark";
 const KEY = "repoviva-theme";
 
 function systemTheme(): Theme {

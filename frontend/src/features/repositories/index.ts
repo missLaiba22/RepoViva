@@ -1,4 +1,4 @@
-export { getRepository, isIndexing, listRepositories } from "./api";
+export { getRepository, isIndexing, listRepositories, onRepositoriesChanged } from "./api";
 export { ConnectRepositoryPage } from "./ConnectRepositoryPage";
-export { RepositoryList } from "./RepositoryList";
+export { RepositoriesPage } from "./RepositoriesPage";
 export { RepositoryPage } from "./RepositoryPage";
