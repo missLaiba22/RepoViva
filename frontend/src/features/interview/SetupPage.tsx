@@ -7,10 +7,10 @@ import { Card } from "../../components/Card";
 import { ConnectionProblem } from "../../components/ConnectionProblem";
 import { EmptyState } from "../../components/EmptyState";
 import { Facts } from "../../components/Facts";
-import { Icon } from "../../components/Icon";
+import { Icon, type IconName } from "../../components/Icon";
 import { PageHeader } from "../../components/PageHeader";
 import { RepoName } from "../../components/RepoName";
-import { PageSpinner, Spinner } from "../../components/Spinner";
+import { PageSpinner } from "../../components/Spinner";
 import { useResource } from "../../hooks/useResource";
 import { REPOSITORIES_CRUMB } from "../../lib/crumbs";
 import { INTERVIEW_FACTS } from "../../lib/interviewFacts";
@@ -44,7 +44,7 @@ export function SetupPage() {
         title="This repository isn't ready yet"
         action={<ButtonLink to={`/repositories/${id}`}>See progress</ButtonLink>}
       >
-        ItInterviews open once we&rsquo;ve finished reading your code, usually within a few minutes.rsquo;s still being prepared, usually for a few minutes.
+        Interviews open once we&rsquo;ve finished reading your code, usually within a few minutes.
       </EmptyState>
     );
   }
@@ -101,26 +101,23 @@ function Setup({ repository }: { repository: Repository }) {
       <Facts items={INTERVIEW_FACTS} label="What to expect" />
 
       <Card className={styles.card}>
-        <div className={styles.row}>
-          <span className={styles.rowIcon}>
-            <Icon name="mic" />
-          </span>
-          {mode === "text" ? (
-            <div className={styles.rowMain}>
-              <h2 className={styles.rowTitle}>Microphone</h2>
-              <p className={styles.muted}>Off. You&rsquo;ll type your answers.</p>
-            </div>
-          ) : (
-            <MicPanel check={check} onStart={start} />
-          )}
-        </div>
+        <header className={styles.cardHead}>
+          <h2 className={styles.cardTitle}>Audio check</h2>
+          <p className={styles.muted}>Takes a few seconds. Check both before you begin.</p>
+        </header>
 
-        <div className={styles.row}>
-          <span className={styles.rowIcon}>
-            <Icon name="speaker" />
-          </span>
-          <SpeakerPanel />
-        </div>
+        {mode === "text" ? (
+          <Row
+            icon="mic"
+            title="Microphone"
+            status={<Status tone="neutral">Off</Status>}
+            hint={<>You&rsquo;ll type your answers.</>}
+          />
+        ) : (
+          <MicRow check={check} onStart={start} />
+        )}
+
+        <SpeakerRow />
 
         {micSupported() && (
           <label htmlFor={typeId} className={styles.toggle}>
@@ -142,6 +139,7 @@ function Setup({ repository }: { repository: Repository }) {
       <div className={styles.footer}>
         {startError && (
           <p className={styles.error} role="alert">
+            <Icon name="alert" size={16} />
             {startError}
           </p>
         )}
@@ -151,7 +149,9 @@ function Setup({ repository }: { repository: Repository }) {
           </Button>
           {!canStart && !starting && (
             <span className={styles.muted}>
-              {check.state === "live" ? "Say a few words to check your microphone." : "Check your microphone first."}
+              {check.state === "live"
+                ? "Say a few words to finish the microphone check."
+                : "Check your microphone to continue."}
             </span>
           )}
         </div>
@@ -161,85 +161,89 @@ function Setup({ repository }: { repository: Repository }) {
   );
 }
 
-const MIC_ERRORS: Record<MicErrorKind, { title: string; body: string }> = {
+const MIC_ERRORS: Record<MicErrorKind, { status: string; title: string; body: string }> = {
   denied: {
+    status: "Blocked",
     title: "Microphone access is blocked",
     body: "Allow the microphone for this site from the icon in your browser's address bar, then try again.",
   },
   "not-found": {
+    status: "Not found",
     title: "No microphone found",
     body: "Plug in a microphone or headset, then try again.",
   },
   busy: {
+    status: "In use",
     title: "Your microphone is in use",
     body: "Another app may be using it. Close it, then try again.",
   },
   unsupported: {
+    status: "Not supported",
     title: "This browser can't use a microphone here",
     body: "Try a recent Chrome, Edge, Firefox or Safari, or type your answers instead.",
   },
 };
 
-function MicPanel({ check, onStart }: { check: ReturnType<typeof useMicCheck>["check"]; onStart: (deviceId?: string) => void }) {
+function MicRow({ check, onStart }: { check: ReturnType<typeof useMicCheck>["check"]; onStart: (deviceId?: string) => void }) {
   const selectId = useId();
 
   if (check.state === "idle") {
     return (
-      <RowBody title="Microphone" hint="Needed to hear your answers.">
-        <Button variant="secondary" onClick={() => onStart()}>
-          Check my microphone
-        </Button>
-      </RowBody>
-    );
-  }
-
-  if (check.state === "requesting") {
-    return (
-      <RowBody
+      <Row
+        icon="mic"
         title="Microphone"
-        hint={
-          <span className={styles.waiting}>
-            <Spinner label="Waiting for permission" /> Allow the microphone in your browser…
-          </span>
+        status={<Status tone="neutral">Not checked</Status>}
+        hint="Needed to hear your answers."
+        action={
+          <Button variant="secondary" onClick={() => onStart()}>
+            Check my microphone
+          </Button>
         }
       />
     );
   }
 
-  if (check.state === "error") {
-    const { title, body } = MIC_ERRORS[check.kind];
+  if (check.state === "requesting") {
     return (
-      <div className={styles.rowMain} role="alert">
-        <div className={styles.rowHead}>
-          <div>
-            <h2 className={styles.rowTitle}>Microphone</h2>
-            <p className={styles.problemTitle}>{title}</p>
-          </div>
+      <Row
+        icon="mic"
+        title="Microphone"
+        status={<Status tone="progress">Waiting for permission</Status>}
+        hint={<>Allow the microphone in your browser&rsquo;s prompt.</>}
+      />
+    );
+  }
+
+  if (check.state === "error") {
+    const { status, title, body } = MIC_ERRORS[check.kind];
+    return (
+      <Row
+        icon="mic"
+        title="Microphone"
+        status={<Status tone="error">{status}</Status>}
+        hint={
+          <>
+            <span className={styles.problemTitle}>{title}.</span> {body}
+          </>
+        }
+        action={
           <Button variant="secondary" onClick={() => onStart()}>
             Try again
           </Button>
-        </div>
-        <p className={styles.muted}>{body}</p>
-      </div>
+        }
+        alert
+      />
     );
   }
 
   return (
-    <div className={styles.rowMain}>
-      <div className={styles.rowHead}>
-        <div>
-          <h2 className={styles.rowTitle}>Microphone</h2>
-          <p className={check.heard ? styles.ok : styles.muted} aria-live="polite">
-            {check.heard ? (
-              <>
-                <Icon name="check" size={14} /> We can hear you
-              </>
-            ) : (
-              "Say a few words, as if answering."
-            )}
-          </p>
-        </div>
-      </div>
+    <Row
+      icon="mic"
+      title="Microphone"
+      status={check.heard ? <Status tone="ok">Working</Status> : <Status tone="progress">Listening</Status>}
+      hint={check.heard ? "We can hear you clearly." : "Say a few words, as if answering a question."}
+    >
+      <LevelMeter level={check.level} />
       {check.devices.length > 1 && (
         <div className={styles.field}>
           <label htmlFor={selectId} className={styles.fieldLabel}>
@@ -259,43 +263,93 @@ function MicPanel({ check, onStart }: { check: ReturnType<typeof useMicCheck>["c
           </select>
         </div>
       )}
-      <LevelMeter level={check.level} />
-    </div>
+    </Row>
   );
 }
 
-function SpeakerPanel() {
-  const [playing, setPlaying] = useState(false);
+function SpeakerRow() {
+  const [state, setState] = useState<"idle" | "playing" | "played">("idle");
 
   async function handlePlay() {
-    setPlaying(true);
+    setState("playing");
     try {
       await playTestSound();
     } finally {
-      setPlaying(false);
+      setState("played");
     }
   }
 
+  const status =
+    state === "idle" ? (
+      <Status tone="neutral">Not tested</Status>
+    ) : state === "playing" ? (
+      <Status tone="progress">Playing</Status>
+    ) : (
+      <Status tone="ok">Tested</Status>
+    );
+
   return (
-    <RowBody title="Speakers" hint="Questions are read aloud.">
-      <Button variant="secondary" onClick={handlePlay} disabled={playing}>
-        <Icon name="play" size={14} />
-        {playing ? "Playing…" : "Play test sound"}
-      </Button>
-    </RowBody>
+    <Row
+      icon="speaker"
+      title="Speakers"
+      status={status}
+      hint={state === "played" ? <>Didn&rsquo;t hear it? Check your volume and output device.</> : "Questions are read aloud."}
+      action={
+        <Button variant="secondary" onClick={handlePlay} disabled={state === "playing"}>
+          <Icon name={state === "played" ? "replay" : "play"} size={14} />
+          {state === "played" ? "Play again" : "Play test sound"}
+        </Button>
+      }
+    />
   );
 }
 
-function RowBody({ title, hint, children }: { title: string; hint: ReactNode; children?: ReactNode }) {
+function Row({
+  icon,
+  title,
+  status,
+  hint,
+  action,
+  alert = false,
+  children,
+}: {
+  icon: IconName;
+  title: string;
+  status: ReactNode;
+  hint: ReactNode;
+  action?: ReactNode;
+  alert?: boolean;
+  children?: ReactNode;
+}) {
   return (
-    <div className={styles.rowMain}>
-      <div className={styles.rowHead}>
-        <div>
-          <h2 className={styles.rowTitle}>{title}</h2>
-          <p className={styles.muted}>{hint}</p>
+    <section className={styles.row} aria-label={title} role={alert ? "alert" : undefined}>
+      <span className={styles.rowIcon} aria-hidden="true">
+        <Icon name={icon} size={18} />
+      </span>
+      <div className={styles.rowMain}>
+        <div className={styles.rowHead}>
+          <div className={styles.rowText}>
+            <div className={styles.rowTitleLine}>
+              <h3 className={styles.rowTitle}>{title}</h3>
+              <span aria-live="polite">{status}</span>
+            </div>
+            <p className={styles.hint}>{hint}</p>
+          </div>
+          {action}
         </div>
         {children}
       </div>
-    </div>
+    </section>
   );
+}
+
+const TONES = {
+  neutral: styles.toneNeutral,
+  progress: styles.toneProgress,
+  ok: styles.toneOk,
+  error: styles.toneError,
+};
+
+function Status({ tone, children }: { tone: keyof typeof TONES; children: ReactNode }) {
+  return <span className={`${styles.status} ${TONES[tone]}`}>{children}</span>;
 }
