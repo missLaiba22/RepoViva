@@ -19,10 +19,8 @@ class Settings(BaseSettings):
     env: str
     internal_hmac_secret: str
 
-    # Where cloned repositories live on disk during and after ingestion.
-    # One subdirectory per repository, keyed by repository_id.
-    # Persists across service restarts — the clone is scratch space for
-    # the ingestion pipeline, but keeping it around makes re-ingestion cheap.
+    # Scratch space for clones during ingestion, one subdirectory per repository_id.
+    # Each clone is deleted when its ingestion job ends.
     workspace_root: Path
     database_url: str
     voyage_api_key: SecretStr

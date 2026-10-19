@@ -11,6 +11,7 @@ by its claim and runs again (decision 061).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from repository_service.clients.events import IngestionEventPublisher, get_event_publisher
@@ -20,6 +21,7 @@ from repository_service.indexing import RepositoryTooLargeError, run_indexing
 from repository_service.ingestion import jobs
 from repository_service.ingestion.fetcher import FetchError, fetch_repository
 from repository_service.ingestion.jobs import IngestionJob, JobStatus
+from repository_service.ingestion.workspace import remove_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,15 @@ async def _publish_outcome(
 
 async def _ingest(job: IngestionJob) -> str | None:
     """Fetch and index the repository. Returns an error message, or None on success."""
+    workspace_root = get_settings().workspace_root
+    try:
+        return await _fetch_and_index(job)
+    finally:
+        # Everything after ingestion reads Postgres; the clone is only scratch space.
+        await asyncio.to_thread(remove_workspace, job.repository_id, workspace_root)
+
+
+async def _fetch_and_index(job: IngestionJob) -> str | None:
     repository_id = job.repository_id
     try:
         fetch_result = await fetch_repository(

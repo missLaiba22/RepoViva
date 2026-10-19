@@ -6,17 +6,18 @@ keyed by repository_id. The clone is scratch space used during
 ingestion; the durable result is the repository snapshot data, chunks,
 and embeddings stored in Postgres.
 
-The workspace is treated as ephemeral. A service restart or
-redeployment may remove the clone, so re-ingestion must be able to
-clone the repository again. Any optimization to reuse an existing
-clone can be added later without making persistence a requirement.
+The clone is deleted when the ingestion job ends, whatever the outcome;
+re-ingestion always clones again.
 """
 
 from __future__ import annotations
 
+import logging
 import shutil
 import stat
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def workspace_for(repository_id: str, workspace_root: Path) -> Path:
@@ -42,11 +43,25 @@ def prepare_clean_workspace(repository_id: str, workspace_root: Path) -> Path:
     ingestion job completes — see the module docstring.
     """
     path = workspace_for(repository_id, workspace_root)
-    if path.exists():
-        # Git makes pack files read-only, and Windows won't delete read-only files.
-        for file in path.rglob("*"):
-            if file.is_file():
-                file.chmod(stat.S_IREAD | stat.S_IWRITE)
-        shutil.rmtree(path)
+    _remove(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def remove_workspace(repository_id: str, workspace_root: Path) -> None:
+    """Delete a repository's clone. Never raises: a leftover clone is only disk."""
+    path = workspace_for(repository_id, workspace_root)
+    try:
+        _remove(path)
+    except OSError:
+        logger.exception("could not remove workspace: repository_id=%s", repository_id)
+
+
+def _remove(path: Path) -> None:
+    if not path.exists():
+        return
+    # Git makes pack files read-only, and Windows won't delete read-only files.
+    for file in path.rglob("*"):
+        if file.is_file():
+            file.chmod(stat.S_IREAD | stat.S_IWRITE)
+    shutil.rmtree(path)
