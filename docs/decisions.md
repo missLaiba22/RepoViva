@@ -3133,3 +3133,48 @@ has the plan loaded when it sends the message. The page shows
 **Revisit when:**
 The number of questions can change during a session.
 
+
+## 063 — Run everything on one EC2 instance behind Caddy
+
+*Status: decided and implemented 2026-10-19. Settles the hosting part of
+"chosen at deployment" (decisions 053, 057).*
+
+**Context:**
+The first deployment runs on an AWS free-plan account with $100 of credit
+and about six months left, for ~10 concurrent interviews. In dev the
+frontend reaches Core API (`/v1`) and Voice Service (`/v1/ws`) through
+the Vite proxy, so the browser sees one origin and the session cookie
+works; production needs the same. The microphone only works on HTTPS.
+
+**Decision:**
+- One EC2 instance (`t4g.small`) runs `docker-compose.prod.yml`: one
+  image per service, run twice (API and worker), and Caddy.
+- Caddy serves the built frontend, proxies `/v1/ws/*` to Voice Service
+  and `/v1/*` to Core API, and gets the HTTPS certificate. Only ports 80
+  and 443 are open; services reach each other by compose service name.
+- SQS and EventBridge are real AWS, reached with the instance's IAM role.
+- Postgres on Neon and MongoDB on Atlas, free tiers, in the instance's
+  region.
+- The session cookie is `Secure` when `COOKIE_SECURE=true`.
+
+**Options considered:**
+- **ECS Fargate + ALB (+ NAT, RDS).** ~$130+/month: the credit lasts
+  under a month.
+- **One EC2 instance per service.** Four times the cost for no gain at
+  this scale; containers already keep services independent.
+- **Frontend on S3 + CloudFront.** Nearly free, but a different origin
+  from the API, so the cookie and WebSocket need CORS and cross-site
+  cookie work.
+- **Postgres and MongoDB as containers on the instance.** Needs a 4 GB
+  instance (about double the cost), and the data dies with the account.
+
+**Tradeoff:**
+- One machine is one point of failure; a reboot stops interviews in
+  progress. Acceptable for an MVP.
+- Caddy is a reverse proxy in front of two services; it only routes, the
+  same as the Vite proxy, so decision 022 (no API gateway) holds.
+- About $15–20/month: instance, disk and one public IPv4.
+
+**Revisit when:**
+The credit or free plan ends, a service needs to scale on its own, or
+uptime matters more than cost.

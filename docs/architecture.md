@@ -125,7 +125,11 @@ Single database, shared by Core API, Repository Service and Evaluation Service (
 
 ### MongoDB
 
-Voice Service's own store for interview sessions (decision 053). Locally a container in `docker-compose.yml`; in production MongoDB Atlas, chosen at deployment.
+Voice Service's own store for interview sessions (decision 053). Locally a container in `docker-compose.yml`; in production MongoDB Atlas (decision 063).
+
+## Deployment (decision 063)
+
+One EC2 instance runs `docker-compose.prod.yml`. Each service has one image (`<service>/Dockerfile`, built from the repo root), run twice: the API and its worker. Caddy (`frontend/Dockerfile`, `infra/caddy/Caddyfile`) serves the built frontend, proxies `/v1/ws/*` to Voice Service and `/v1/*` to Core API, and terminates HTTPS; it is the only published container. SQS and EventBridge are real AWS, reached with the instance's IAM role. Postgres is Neon and MongoDB is Atlas, in the instance's region. Secrets live in each service's `.env.prod`, never in an image. Setup steps: `infra/aws/README.md`.
 
 ## Core Entities
 
@@ -481,7 +485,7 @@ Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row 
 - User isolation is enforced at the data-access layer in Core API via a `get_current_user` dependency on protected routes, and at the service layer via queries always scoped by `owner_user_id`. `/health` and auth endpoints are the only unauthenticated routes.
 - OAuth tokens are encrypted at the application layer (Core API). Everything else relies on disk-level encryption.
 - Shared database across services with strict per-service table ownership (see decision 021).
-- No API gateway — frontend calls Core API and Voice Service directly (see decision 022).
+- No API gateway — frontend calls Core API and Voice Service directly (see decision 022). In production Caddy only routes by path, as the Vite proxy does in dev (decision 063).
 - Inter-service jobs and events go through SQS and EventBridge (decision 057). Locally, LocalStack runs both (`docker compose up -d`; `infra/localstack/init-queues.sh` creates the bus, rules, queues and DLQs). On AWS, IAM task roles replace HMAC on these paths.
 - Internal service-to-service HTTP calls are authenticated with HMAC-SHA256 over `timestamp + "." + body`, with a 60-second freshness window and a single shared secret (see decision 027). All services use the shared `libs/repoviva-common` package for signing, verification and the `verify_hmac` dependency (decision 054); it holds infrastructure only, never domain code.
 - Each service makes all outbound HTTP calls through one long-lived httpx client opened in its lifespan (decision 055): `AsyncClient` in the async services, `Client` in Core API, whose routes are sync.
@@ -493,7 +497,6 @@ Recovery: a crash leaves the message on the queue, and SQS redelivers it; a row 
 
 Open decisions that will shape architecture:
 
-- Choice of managed Postgres provider (Supabase or Neon)
 - Full data model (fields per entity, per-service schemas)
 - Streaming STT (live captions, server-side end-of-speech detection) and barge-in (decisions 043, 045)
 - Logout endpoint (deferred — no state to clean up server-side, so it's a cookie-clear + redirect when needed)
