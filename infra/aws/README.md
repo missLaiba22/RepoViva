@@ -113,30 +113,37 @@ git clone https://github.com/missLaiba22/RepoViva.git && cd RepoViva
 
 ## 8. The `.env.prod` files
 
-For each of `core-api`, `repository-service`, `voice-service`,
-`evaluation-service`: `cp .env.example .env.prod`, fill in the real values,
-and change:
+All secrets go in **one** file; a script writes the four `.env.prod` files:
 
-- `ENV=production`
-- `AWS_REGION=<your region>`
-- **Delete** `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-- Every `*_QUEUE_URL` → the URLs from step 3
-- `DATABASE_URL` → Neon (step 2), `MONGODB_URI` → Atlas
-- `INTERNAL_HMAC_SECRET` → one new value, the same in all four
-- Core API: `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` from step 6,
-  `GITHUB_OAUTH_REDIRECT_URI=https://<domain>/v1/auth/github/callback`,
-  `FRONTEND_BASE_URL=https://<domain>`, new `COOKIE_SECRET` and
-  `TOKEN_ENCRYPTION_KEY`
+```bash
+cp ~/RepoViva/infra/aws/secrets.env.example ~/repoviva-secrets.env
+chmod 600 ~/repoviva-secrets.env
+nano ~/repoviva-secrets.env          # replace every <paste>
+python3 ~/RepoViva/infra/aws/make_env.py
+```
 
-Don't set the `*_BASE_URL`s between services, `WORKSPACE_ROOT` or
-`COOKIE_SECURE`: `docker-compose.prod.yml` sets them.
+The script fills in the queue URLs, region and domain, builds both database
+URL forms from the one Neon string (dropping `channel_binding`, which asyncpg
+rejects), and generates the internal secrets once into
+`~/repoviva-generated.env`, so rerunning it never rotates keys. It prints key
+names only. After changing a secret, rerun it and recreate the affected
+containers (`up -d --force-recreate <service>`).
 
-Generate secrets with `python3 -c "import secrets; print(secrets.token_hex(32))"`.
+Before starting everything, test the MongoDB login on its own:
+
+```bash
+cd ~/RepoViva && docker compose -f docker-compose.prod.yml run --rm --no-deps voice-worker \
+  python -c "import os,pymongo; pymongo.MongoClient(os.environ['MONGODB_URI'], serverSelectionTimeoutMS=8000).admin.command('ping'); print('MongoDB OK')"
+```
+
+`bad auth` means the password is wrong: replace Atlas's `<db_password>`
+including the `< >`.
 
 ## 9. Start it
 
 ```bash
-export DOMAIN=<ip-with-dashes>.sslip.io
+cd ~/RepoViva
+echo DOMAIN=<ip-with-dashes>.sslip.io > .env   # compose reads it; gitignored
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs -f core-api core-worker
@@ -149,7 +156,7 @@ interview.
 
 ```bash
 cd RepoViva && git pull
-DOMAIN=<domain> docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ## Saving credit
