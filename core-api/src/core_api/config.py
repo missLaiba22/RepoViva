@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # Secrets
     cookie_secret: str
     token_encryption_key: str
+    # True behind HTTPS (production); localhost is plain http.
+    cookie_secure: bool = False
 
     # SQS (decision 057). Endpoint and keys are set only for LocalStack;
     # on AWS they stay unset and the task's IAM role is used.

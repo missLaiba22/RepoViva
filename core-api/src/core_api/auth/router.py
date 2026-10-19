@@ -39,7 +39,7 @@ def login() -> RedirectResponse:
         value=signed,
         max_age=STATE_MAX_AGE_SECONDS,
         httponly=True,
-        secure=False,          # localhost is http; flip to True in production
+        secure=get_settings().cookie_secure,
         samesite="lax",
         path="/",
     )
@@ -86,7 +86,7 @@ def callback(
         value=sign_session(user.id),
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
-        secure=False,
+        secure=get_settings().cookie_secure,
         samesite="lax",
         path="/",
     )
