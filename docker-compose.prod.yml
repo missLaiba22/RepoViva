@@ -1,0 +1,94 @@
+# Production on one EC2 instance (decision 063): docker compose -f docker-compose.prod.yml up -d --build
+# Postgres is Neon and MongoDB is Atlas; SQS and EventBridge are real AWS, reached
+# with the instance's IAM role, so no AWS_ENDPOINT_URL or keys in the env files.
+# Secrets live in each service's .env.prod (never committed). Only Caddy is published.
+
+x-service: &service
+  restart: unless-stopped
+
+services:
+  caddy:
+    <<: *service
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    image: repoviva-frontend
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN, e.g. 1-2-3-4.sslip.io}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [core-api, voice-service]
+
+  core-api:
+    <<: *service
+    build: { context: ., dockerfile: core-api/Dockerfile }
+    image: repoviva-core-api
+    env_file: core-api/.env.prod
+    environment: &core-env
+      VOICE_SERVICE_BASE_URL: http://voice-service:8002
+      EVALUATION_SERVICE_BASE_URL: http://evaluation-service:8003
+      COOKIE_SECURE: "true"
+  core-worker:
+    <<: *service
+    image: repoviva-core-api
+    command: ["python", "-m", "core_api.worker"]
+    env_file: core-api/.env.prod
+    environment: *core-env
+    depends_on: [core-api]
+
+  repository-service:
+    <<: *service
+    build: { context: ., dockerfile: repository-service/Dockerfile }
+    image: repoviva-repository-service
+    env_file: repository-service/.env.prod
+    environment: &repository-env
+      WORKSPACE_ROOT: /app/repository-service/workspace
+    volumes: [repo_workspace:/app/repository-service/workspace]
+  repository-worker:
+    <<: *service
+    image: repoviva-repository-service
+    command: ["python", "-m", "repository_service.worker"]
+    env_file: repository-service/.env.prod
+    environment: *repository-env
+    volumes: [repo_workspace:/app/repository-service/workspace]
+    depends_on: [repository-service]
+
+  voice-service:
+    <<: *service
+    build: { context: ., dockerfile: voice-service/Dockerfile }
+    image: repoviva-voice-service
+    env_file: voice-service/.env.prod
+    environment: &voice-env
+      CORE_API_BASE_URL: http://core-api:8000
+      REPOSITORY_SERVICE_BASE_URL: http://repository-service:8001
+  voice-worker:
+    <<: *service
+    image: repoviva-voice-service
+    command: ["python", "-m", "voice_service.worker"]
+    env_file: voice-service/.env.prod
+    environment: *voice-env
+    depends_on: [voice-service]
+
+  evaluation-service:
+    <<: *service
+    build: { context: ., dockerfile: evaluation-service/Dockerfile }
+    image: repoviva-evaluation-service
+    env_file: evaluation-service/.env.prod
+    environment: &evaluation-env
+      VOICE_SERVICE_BASE_URL: http://voice-service:8002
+      REPOSITORY_SERVICE_BASE_URL: http://repository-service:8001
+  evaluation-worker:
+    <<: *service
+    image: repoviva-evaluation-service
+    command: ["python", "-m", "evaluation_service.worker"]
+    env_file: evaluation-service/.env.prod
+    environment: *evaluation-env
+    depends_on: [evaluation-service]
+
+volumes:
+  caddy_data:
+  caddy_config:
+  repo_workspace:

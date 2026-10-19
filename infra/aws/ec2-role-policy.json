@@ -1,0 +1,30 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RepoVivaQueues",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": [
+        "arn:aws:sqs:REGION:ACCOUNT_ID:ingestion-jobs",
+        "arn:aws:sqs:REGION:ACCOUNT_ID:report-jobs",
+        "arn:aws:sqs:REGION:ACCOUNT_ID:planning-jobs",
+        "arn:aws:sqs:REGION:ACCOUNT_ID:core-interview-events",
+        "arn:aws:sqs:REGION:ACCOUNT_ID:evaluation-interview-events",
+        "arn:aws:sqs:REGION:ACCOUNT_ID:core-ingestion-events"
+      ]
+    },
+    {
+      "Sid": "RepoVivaBus",
+      "Effect": "Allow",
+      "Action": "events:PutEvents",
+      "Resource": "arn:aws:events:REGION:ACCOUNT_ID:event-bus/repoviva"
+    }
+  ]
+}

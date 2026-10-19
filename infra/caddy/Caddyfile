@@ -1,0 +1,19 @@
+# One origin for the app, the API and the interview WebSocket, as in dev
+# (decision 063). Caddy gets the HTTPS certificate for {$DOMAIN} itself;
+# the browser only allows the microphone on HTTPS.
+{$DOMAIN} {
+	encode gzip
+
+	# More specific first, as in vite.config.ts.
+	handle /v1/ws/* {
+		reverse_proxy voice-service:8002
+	}
+	handle /v1/* {
+		reverse_proxy core-api:8000
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
