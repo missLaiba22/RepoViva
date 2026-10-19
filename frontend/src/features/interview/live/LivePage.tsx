@@ -139,13 +139,18 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
   return (
     <div className={styles.room}>
       <header className={styles.top}>
-        <span className={styles.repo}>{handoff.repositoryName}</span>
+        <span className={styles.repo}>
+          <Icon name="repo" size={16} />
+          <span className={styles.repoName}>{handoff.repositoryName}</span>
+        </span>
         {state.total ? <Progress current={state.seq} answered={state.answered} total={state.total} /> : <span />}
-        {state.phase !== "ending" && (
-          <Button variant="ghost" onClick={() => setConfirmingEnd(true)}>
-            End interview
-          </Button>
-        )}
+        <div className={styles.topEnd}>
+          {state.phase !== "ending" && (
+            <Button variant="ghost" onClick={() => setConfirmingEnd(true)}>
+              End interview
+            </Button>
+          )}
+        </div>
       </header>
 
       <main className={styles.stage}>
@@ -155,14 +160,16 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
           <Waiting text="Getting your first question ready…" />
         ) : (
           <>
-            <p className={styles.counter}>
-              Question {questionNumber}
-              {state.total ? ` of ${state.total}` : ""}
-            </p>
-            <h1 className={styles.question} aria-live="polite">
-              {state.question}
-            </h1>
-            <QuestionAudio live={live} />
+            <section className={styles.questionBlock}>
+              <p className={styles.counter}>
+                Question {questionNumber}
+                {state.total ? ` of ${state.total}` : ""}
+              </p>
+              <h1 className={styles.question} aria-live="polite">
+                {state.question}
+              </h1>
+              <QuestionAudio live={live} />
+            </section>
             <AnswerArea live={live} />
           </>
         )}
@@ -238,12 +245,14 @@ function QuestionAudio({ live }: { live: LiveInterview }) {
   if (state.phase === "asking") {
     return (
       <div className={styles.audioRow}>
-        <span className={styles.speaking} aria-hidden="true">
-          <span />
-          <span />
-          <span />
+        <span className={styles.asking}>
+          <span className={styles.speaking} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          Asking…
         </span>
-        <span className={styles.muted}>Asking…</span>
         {state.audioComplete && (
           <Button variant="ghost" onClick={live.skipAudio}>
             Skip to answer
@@ -268,11 +277,17 @@ function QuestionAudio({ live }: { live: LiveInterview }) {
 function AnswerArea({ live }: { live: LiveInterview }) {
   const { state } = live;
 
-  if (state.phase === "ending") return <Waiting text="Ending the interview…" />;
+  if (state.phase === "ending") {
+    return (
+      <div className={styles.panel}>
+        <Waiting text="Ending the interview…" />
+      </div>
+    );
+  }
 
   if (state.phase === "sending" || state.phase === "preparing") {
     return (
-      <div className={styles.answer}>
+      <div className={styles.panel}>
         {state.transcript && (
           <div className={styles.heard}>
             <p className={styles.heardLabel}>What we heard</p>
@@ -294,21 +309,32 @@ function AnswerArea({ live }: { live: LiveInterview }) {
 
   const canAnswer = state.phase === "answering" || state.phase === "recording";
 
+  const showSwitch = !live.micProblem && canAnswer && state.phase !== "recording";
+
   return (
-    <div className={styles.answer}>
+    <div className={styles.panel}>
       {state.notice && (
         <p className={styles.notice} role="alert">
+          <Icon name="alert" size={16} />
           {state.notice}
         </p>
       )}
-      {live.micProblem && <p className={styles.notice}>{live.micProblem}</p>}
+      {live.micProblem && (
+        <p className={styles.notice}>
+          <Icon name="alert" size={16} />
+          {live.micProblem}
+        </p>
+      )}
 
       {live.typing ? <TypedAnswer live={live} enabled={state.phase === "answering"} /> : <SpokenAnswer live={live} />}
 
-      {!live.micProblem && canAnswer && state.phase !== "recording" && (
-        <button type="button" className={styles.switch} onClick={() => live.setTyping(!live.typing)}>
-          {live.typing ? "Speak instead" : "Type instead"}
-        </button>
+      {showSwitch && (
+        <div className={styles.switchRow}>
+          <Button variant="secondary" onClick={() => live.setTyping(!live.typing)}>
+            <Icon name={live.typing ? "mic" : "keyboard"} size={16} />
+            {live.typing ? "Speak instead" : "Type instead"}
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -317,35 +343,42 @@ function AnswerArea({ live }: { live: LiveInterview }) {
 function SpokenAnswer({ live }: { live: LiveInterview }) {
   const { state } = live;
   const recording = state.phase === "recording";
+  const ready = state.phase === "answering";
   const level = useLevel(live.level, recording);
   const remaining = MAX_ANSWER_SECONDS - live.recordingSeconds;
+  const low = remaining <= 20;
 
   return (
     <div className={styles.spoken}>
-      <MicButton
-        recording={recording}
-        disabled={state.phase !== "answering" && !recording}
-        onClick={recording ? live.stopRecording : live.startRecording}
-      />
-      <p className={styles.micLabel} aria-live="polite">
+      <MicButton recording={recording} disabled={!ready && !recording} onClick={recording ? live.stopRecording : live.startRecording} />
+
+      <div className={styles.micStatus} aria-live="polite">
         {recording ? (
-          <span className={styles.listening}>
-            <span className={styles.recDot} aria-hidden="true" />
-            Listening
-          </span>
-        ) : state.phase === "answering" ? (
-          "Tap to answer"
+          <>
+            <p className={styles.recordingLine}>
+              <span className={styles.listening}>
+                <span className={styles.recDot} aria-hidden="true" />
+                Listening
+              </span>
+              <span className={low ? styles.timerLow : styles.timer}>{formatSeconds(live.recordingSeconds)}</span>
+            </p>
+            <p className={low ? styles.micHintLow : styles.micHint}>
+              {low ? `${remaining}s left. Tap the square to send.` : "Tap the square when you’re done."}
+            </p>
+          </>
+        ) : ready ? (
+          <>
+            <p className={styles.micTitle}>Tap to answer</p>
+            <p className={styles.micHint}>Speak naturally. You can take your time.</p>
+          </>
         ) : (
-          "The mic opens after the question"
+          <p className={styles.micHint}>The mic opens after the question</p>
         )}
-      </p>
+      </div>
+
       {recording && (
-        <div className={styles.recordingInfo}>
+        <div className={styles.meter}>
           <LevelMeter level={level} label="Your voice" />
-          <p className={remaining <= 20 ? styles.timerLow : styles.timer}>
-            {formatSeconds(live.recordingSeconds)}
-            {remaining <= 20 ? ` · ${remaining}s left` : " · tap to finish"}
-          </p>
         </div>
       )}
     </div>

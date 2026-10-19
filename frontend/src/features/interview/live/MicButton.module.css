@@ -4,51 +4,70 @@
   place-items: center;
   width: 5.5rem;
   height: 5.5rem;
-  border: none;
+  border: 2px solid transparent;
   border-radius: 50%;
   background: var(--primary);
   color: var(--on-primary);
   cursor: pointer;
-  transition: background-color 150ms ease, transform 150ms ease, opacity 150ms ease;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+/* Ready: a soft teal halo invites the tap. */
+.mic:not(:disabled):not(.recording) {
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 .mic:hover:not(:disabled) {
-  background: var(--primary-hover);
   transform: scale(1.03);
 }
 
+.mic:not(.recording):hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
 .mic:focus-visible {
-  border-radius: 50%;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .mic:disabled {
+  border-color: var(--border);
   background: var(--surface-sunken);
   color: var(--text-muted);
   cursor: not-allowed;
 }
 
+/* Recording: the button becomes a stop control. */
 .recording {
-  background: var(--primary-hover);
+  border-color: var(--danger);
+  background: var(--surface);
+  color: var(--danger);
 }
 
-/* A slow, soft ring: "listening", without alarm-red. */
 .recording::after {
   content: "";
   position: absolute;
   inset: -8px;
-  border: 2px solid var(--primary);
+  border: 2px solid var(--danger);
   border-radius: 50%;
-  opacity: 0.5;
+  opacity: 0.4;
   animation: ring 1.8s ease-out infinite;
 }
 
 @keyframes ring {
   from {
     transform: scale(0.94);
-    opacity: 0.55;
+    opacity: 0.45;
   }
   to {
-    transform: scale(1.18);
+    transform: scale(1.2);
     opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording::after {
+    animation: none;
   }
 }

@@ -62,6 +62,12 @@ const PATHS = {
       <path d="M7.5 16V11M12 16V6.5M16.5 16v-3" />
     </>
   ),
+  keyboard: (
+    <>
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M7 10h.01M10.5 10h.01M14 10h.01M17 10h.01M8 14h8" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof PATHS;
