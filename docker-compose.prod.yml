@@ -46,6 +46,8 @@ services:
     env_file: repository-service/.env.prod
     environment: &repository-env
       WORKSPACE_ROOT: /app/repository-service/workspace
+      # CocoIndex's own state DB; on the volume so it survives restarts.
+      COCOINDEX_DB: /app/repository-service/workspace/.cocoindex-db
     volumes: [repo_workspace:/app/repository-service/workspace]
   repository-worker:
     <<: *service
