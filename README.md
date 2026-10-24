@@ -1,29 +1,43 @@
+<div align="center">
+
 # RepoViva
 
-A voice-based interview coach for developers: connect a GitHub repository, answer spoken interview questions about your own code, and get a graded report.
+**Practise explaining the code you actually wrote.**
 
-**Live:** [https://15-134-29-83.sslip.io](https://15-134-29-83.sslip.io/)
+Connect a GitHub repository, answer spoken interview questions about it, and get a graded report that cites your files.
+
+[**Try it live →**](https://15-134-29-83.sslip.io/)
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-Vite-61DAFB?logo=react&logoColor=black)
+![AWS](https://img.shields.io/badge/AWS-SQS%20·%20EventBridge%20·%20EC2-FF9900?logo=amazonwebservices&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+</div>
+
+---
 
 ## Why
 
-Developers prepare with generic interview questions but struggle to explain the projects they actually built. RepoViva lets you practise talking about your own code.
+Developers prepare with generic interview questions, then struggle to explain the projects they built. RepoViva interviews you about **your own repository**, out loud, and tells you where your explanation was right, vague or wrong.
 
 ## How it works
 
-1. **Ingest:** the repository is cloned, chunked and embedded (pgvector); the clone is deleted when ingestion ends. A failed repository can be retried in place.
-2. **Plan:** when you start an interview, one scenario question is written per major area of the code (the largest areas are split until there are enough questions).
-3. **Interview:** questions are spoken (TTS) and your answers transcribed (STT) over a WebSocket. The live page waits for the plan, shows question progress, and a session ends after 30 minutes at most.
-4. **Report:** each answer is scored for correctness and clarity against the code it was asked about, with key points citing your files.
+| Step | What happens |
+|---|---|
+| **1. Ingest** | The repository is cloned, chunked and embedded into pgvector. |
+| **2. Plan** | One scenario question is written per major area of the code. |
+| **3. Interview** | Questions are spoken (TTS) and your answers transcribed (STT) over a WebSocket. Up to 30 minutes. |
+| **4. Report** | Each answer is scored for correctness and clarity against the code it was about, with key points linking to your files. |
 
 ## Architecture
 
-Four Python services in a monorepo plus a React frontend. Each service owns its data and talks to the others in one of three ways (decision 057):
+Four Python services and a React app. Each service owns its data and talks to the others in one of three ways:
 
-- **Queries** (the caller needs the answer): HMAC-signed HTTP.
-- **Jobs** ("do X"): an SQS queue, consumed by the owning service's worker.
-- **Events** ("X happened"): the EventBridge bus `repoviva`, routed to one SQS queue per consumer.
-
-Every queue has a dead-letter queue, every job is idempotent, and every request carries an `X-Request-ID` through calls, messages and logs.
+- **Queries** — the caller needs the answer → HMAC-signed HTTP
+- **Jobs** — "do X" → an SQS queue, consumed by the owning service's worker
+- **Events** — "X happened" → the EventBridge bus `repoviva`, one queue per consumer
 
 ```mermaid
 flowchart LR
@@ -46,96 +60,85 @@ flowchart LR
     EVAL -->|"chunks"| REPO
 ```
 
-*Solid: HTTP queries (only the main ones shown). Dotted: SQS jobs and EventBridge events.*
+<sub>Solid: HTTP queries (main ones only). Dotted: SQS jobs and EventBridge events.</sub>
 
-| Service | Owns | Data | Port |
+| Service | Responsibility | Data | Port |
 |---|---|---|---|
-| [core-api](core-api/) | GitHub OAuth, users, repositories, interviews; the frontend's only REST API | Postgres | 8000 |
+| [core-api](core-api/) | GitHub login, repositories, interviews; the frontend's REST API | Postgres | 8000 |
 | [repository-service](repository-service/) | Clone, chunk, embed, retrieve | Postgres + pgvector | 8001 |
-| [voice-service](voice-service/) | Question planning and the live interview | MongoDB | 8002 |
+| [voice-service](voice-service/) | Question plan and live interview | MongoDB | 8002 |
 | [evaluation-service](evaluation-service/) | Grading and reports | Postgres | 8003 |
-| [frontend](frontend/) | React + Vite + TypeScript SPA | — | 5173 |
+| [frontend](frontend/) | Web app | — | 5173 |
+| [libs/repoviva-common](libs/repoviva-common/) | Shared infrastructure (HMAC, HTTP, messaging, request IDs) | — | — |
 
-Each backend service runs an API and a worker from the same code. Details: [docs/architecture.md](docs/architecture.md); reasoning: [docs/decisions.md](docs/decisions.md).
+Every queue has a dead-letter queue, every job is idempotent, and an `X-Request-ID` follows each request through calls, messages and logs. More: [architecture](docs/architecture.md) · [decisions](docs/decisions.md).
 
 ## Tech stack
 
-- **Backend:** Python 3.11+, FastAPI, `uv`, pytest, ruff; shared infrastructure in [`libs/repoviva-common`](libs/repoviva-common/) (HMAC, HTTP client, messaging, logging, request IDs)
-- **Frontend:** React, Vite, TypeScript
-- **Messaging:** AWS SQS + EventBridge via `boto3`; LocalStack locally
-- **Data:** PostgreSQL 16 + pgvector, MongoDB (Neon and Atlas in production)
-- **Ingestion:** CocoIndex chunking, Voyage `voyage-4-lite` embeddings
-- **LLMs (Groq):** `qwen/qwen3.8-27b` for question planning, `openai/gpt-oss-120b` for grading
-- **Speech:** Groq Whisper `whisper-large-v3-turbo` (STT), Deepgram Aura-2 (TTS)
-- **Deployment:** Docker Compose on one AWS EC2 instance, Caddy for HTTPS and routing
+| Area | Tools |
+|---|---|
+| Backend | Python 3.11+, FastAPI, `uv`, pytest, ruff |
+| Frontend | React, Vite, TypeScript |
+| Messaging | AWS SQS + EventBridge (`boto3`), LocalStack locally |
+| Data | PostgreSQL 16 + pgvector, MongoDB |
+| Ingestion | CocoIndex chunking, Voyage `voyage-4-lite` embeddings |
+| LLMs (Groq) | `qwen/qwen3.8-27b` for planning, `openai/gpt-oss-120b` for grading |
+| Speech | Groq Whisper (STT), Deepgram Aura-2 (TTS) |
+| Deployment | Docker Compose on AWS EC2, Caddy (HTTPS), Neon, MongoDB Atlas |
 
-## Installation
+## Getting started
 
-Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), Docker, Node.js, Git.
+### 1. Install
+
+Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), Docker, Node.js 20+, Git.
 
 ```bash
 git clone https://github.com/missLaiba22/RepoViva.git && cd RepoViva
+docker compose up -d     # Postgres, MongoDB, LocalStack (queues, bus, rules)
 
-# Postgres, MongoDB and LocalStack (creates the queues, bus and rules)
-docker compose up -d
-
-# Python dependencies for each service
 for s in core-api repository-service voice-service evaluation-service; do (cd $s && uv sync); done
-
-# Core API's database schema
-cd core-api && uv run alembic upgrade head && cd ..
-
-# Frontend dependencies
-cd frontend && npm install && cd ..
+(cd core-api && uv run alembic upgrade head)
+(cd frontend && npm install)
 ```
 
-## Configuration and API keys
+### 2. Configure
 
-Copy each service's `.env.example` to `.env` (`core-api`, `repository-service`, `voice-service`, `evaluation-service`, `frontend`). The examples already point at the local Docker containers and LocalStack; fill in the following:
+Copy `.env.example` to `.env` in each service and in `frontend`. The defaults already point at the local containers; you only need these:
 
-| Setting | Where | How to get it |
+| Key | Service | Where to get it |
 |---|---|---|
-| `INTERNAL_HMAC_SECRET` | all four services, **identical** | `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | core-api | GitHub → Settings → Developer settings → OAuth Apps. Callback URL: `http://localhost:8000/v1/auth/github/callback` |
-| `COOKIE_SECRET`, `TOKEN_ENCRYPTION_KEY` | core-api | two more generated random strings |
-| `VOYAGE_API_KEY` | repository-service | [dash.voyageai.com](https://dash.voyageai.com) |
-| `GROQ_API_KEY` | voice-service, evaluation-service | [console.groq.com/keys](https://console.groq.com/keys) (free tier) |
-| `DEEPGRAM_API_KEY` | voice-service | [console.deepgram.com](https://console.deepgram.com) |
+| `INTERNAL_HMAC_SECRET` | all four (same value) | `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `GITHUB_CLIENT_ID` / `_SECRET` | core-api | [GitHub OAuth app](https://github.com/settings/developers), callback `http://localhost:8000/v1/auth/github/callback` |
+| `COOKIE_SECRET`, `TOKEN_ENCRYPTION_KEY` | core-api | two more generated strings |
+| `VOYAGE_API_KEY` | repository-service | [Voyage AI](https://dash.voyageai.com) |
+| `GROQ_API_KEY` | voice, evaluation | [Groq console](https://console.groq.com/keys) (free tier) |
+| `DEEPGRAM_API_KEY` | voice-service | [Deepgram console](https://console.deepgram.com) |
 
-Optional tuning in voice-service: `MAX_QUESTIONS` (default 6), `MAX_ANSWER_SECONDS` (180). The `AWS_*` endpoint and test keys are for LocalStack only; leave them unset on AWS.
+> **Windows:** use `127.0.0.1` instead of `localhost` in service URLs; `localhost` adds about 2 s per call.
 
-On Windows, use `127.0.0.1` rather than `localhost` in service URLs (`localhost` adds about 2 s per call).
+### 3. Run
 
-## Running locally
-
-Each service runs an API and a worker; give each command its own terminal.
+Each backend service runs an API and a worker. Give each line its own terminal:
 
 ```bash
-cd core-api && uv run uvicorn core_api.main:app --port 8000
-cd core-api && uv run python -m core_api.worker
+cd core-api           && uv run uvicorn core_api.main:app --port 8000
+cd core-api           && uv run python -m core_api.worker
 cd repository-service && uv run uvicorn repository_service.main:app --port 8001
 cd repository-service && uv run python -m repository_service.worker
-cd voice-service && uv run uvicorn voice_service.main:app --port 8002
-cd voice-service && uv run python -m voice_service.worker
+cd voice-service      && uv run uvicorn voice_service.main:app --port 8002
+cd voice-service      && uv run python -m voice_service.worker
 cd evaluation-service && uv run uvicorn evaluation_service.main:app --port 8003
 cd evaluation-service && uv run python -m evaluation_service.worker
-cd frontend && npm run dev
+cd frontend           && npm run dev
 ```
 
-Then open http://localhost:5173:
-
-1. Log in with GitHub.
-2. Add a public repository and wait until it is ready.
-3. Start an interview, pass the audio check, and answer the questions aloud.
-4. Open the report from the Reports page once grading finishes.
-
-Checks: `cd <service> && uv run ruff check . && uv run pytest` · `cd frontend && npm run lint && npm test`.
+Open **http://localhost:5173**, sign in with GitHub, connect a public repository, start an interview once it's ready, and open the report when grading finishes.
 
 ## Deployment
 
-Live at **[https://15-134-29-83.sslip.io](https://15-134-29-83.sslip.io/)**.
+Live at **[15-134-29-83.sslip.io](https://15-134-29-83.sslip.io/)**.
 
-One EC2 instance runs [`docker-compose.prod.yml`](docker-compose.prod.yml): each service's image runs as API and worker, and Caddy serves the frontend, routes `/v1/ws/*` to Voice Service and `/v1/*` to Core API, and terminates HTTPS. SQS and EventBridge are real AWS; Postgres is Neon and MongoDB is Atlas (decision 063). Setup steps: [infra/aws/README.md](infra/aws/README.md).
+One EC2 instance runs [`docker-compose.prod.yml`](docker-compose.prod.yml). Each service image runs as an API and a worker; Caddy serves the frontend, routes `/v1/ws/*` to Voice Service and `/v1/*` to Core API, and terminates HTTPS. SQS and EventBridge are real AWS, Postgres is Neon, MongoDB is Atlas. Setup guide: [infra/aws/README.md](infra/aws/README.md).
 
 ## Limits
 

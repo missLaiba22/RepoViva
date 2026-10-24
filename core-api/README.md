@@ -1,82 +1,78 @@
 # Core API
 
-RepoViva's main REST entry point for the frontend. Owns GitHub OAuth and sessions, users, repository metadata and ingestion status, and interviews. See [docs/architecture.md](../docs/architecture.md) for how it fits with the other services.
+The frontend's only REST API. Owns GitHub login and sessions, users, repositories (with their ingestion status) and interviews. How it fits in: [docs/architecture.md](../docs/architecture.md).
 
-## What's implemented
+## Responsibilities
 
-- **Auth** — GitHub OAuth with a signed state cookie; session kept in a signed `repoviva_session` cookie. OAuth tokens are encrypted at rest (decision 005).
-- **Repositories** — submit a GitHub URL, which creates a `queued` row and triggers ingestion on Repository Service (HMAC-signed). Status moves `queued → in_progress → ready | failed` as Repository Service reports back (decision 029).
-- **Interviews** — create an interview for a `ready` repository and receive a single-use session token. Only its hash is stored; the raw token is returned once (decisions 035–036). You can list your interviews or fetch one, and the responses never include a token.
-- **Interview lifecycle events** — Voice Service reports the end of a session. Only an `active` interview can move to `completed` or `interrupted` (decision 036).
-- **Session token consumption** — Voice Service exchanges a session token once for `{ interview_id, user_id, repository_id }`. One atomic `UPDATE` burns the token and moves the interview `created → active`. A token that is rejected gets a 403 with `reason` set to `unknown`, `expired` or `consumed` (decisions 035–036).
-- **Internal callback** — receives HMAC-signed ingestion events from Repository Service.
+- **Auth:** GitHub OAuth; the session lives in a signed cookie, GitHub tokens are encrypted at rest (decision 005).
+- **Repositories:** a submitted URL becomes a `queued` row and an ingestion job. Status moves `queued → in_progress → ready | failed` from Repository Service's events; a failed one can be retried in place (decision 061).
+- **Interviews:** created for a `ready` repository with a single-use session token (only its hash is stored, decisions 035–036). Voice Service burns the token to start the session.
+- **Ending:** `interview.ended` moves an `active` interview to `completed` or `interrupted`. An `active` interview past its cutoff is ended when read, in case that event never arrives (decision 059).
+- **Plan and report:** proxies the question plan from Voice Service and the report from Evaluation Service, re-sending their jobs when needed.
 
-All user-facing queries are scoped to the current user.
+All user-facing queries are scoped to the signed-in user.
 
-## Endpoints
+## API
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/v1/auth/github/login` | Redirects to GitHub |
-| GET | `/v1/auth/github/callback` | Sets the session cookie |
+| GET | `/v1/auth/github/login` · `/callback` | GitHub OAuth; sets the session cookie |
+| POST | `/v1/auth/github/logout` | Clears the session |
 | GET | `/v1/me` | Current user |
-| POST | `/v1/repositories` | `{ github_url }` |
-| GET | `/v1/repositories` | List your repositories |
-| GET | `/v1/repositories/{id}` | Includes ingestion status |
-| POST | `/v1/interviews` | `{ repository_id }` → interview + session token, and sends the `plan.requested` job. 404 if not yours, 409 if not `ready` |
-| GET | `/v1/interviews` | List your interviews, newest first |
-| GET | `/v1/interviews/{id}` | One interview. 404 if missing or not yours |
-| GET | `/v1/interviews/{id}/plan` | Question plan status from Voice Service; re-sends the job if Voice has none. 503 if Voice is down |
-| POST | `/v1/interviews/{id}/plan/retry` | Re-sends the job for a missing or retryably failed plan; 409 once the interview started |
-| POST | `/internal/v1/session-tokens/consume` | `{ token }` → `{ interview_id, user_id, repository_id }`. 403 `{ reason }` if unknown, expired or consumed (HMAC) |
-| GET | `/health`, `/health/db` | Liveness / DB check |
+| POST | `/v1/repositories` | `{ github_url }` → sends the ingestion job |
+| GET | `/v1/repositories` · `/{id}` | List or read, with ingestion status |
+| POST | `/v1/repositories/{id}/retry` | Retry a failed ingestion (202) |
+| POST | `/v1/interviews` | `{ repository_id }` → interview + session token; sends the plan job. 409 if the repository isn't ready |
+| GET | `/v1/interviews` · `/{id}` | List (newest first) or read |
+| GET | `/v1/interviews/{id}/plan` | Plan status; 503 if Voice Service is down |
+| POST | `/v1/interviews/{id}/plan/retry` | Re-send the plan job; 409 once started |
+| GET | `/v1/interviews/{id}/report` | The report; 202 while grading |
+| POST | `/v1/interviews/{id}/report/retry` | Regenerate a failed report |
+| POST | `/internal/v1/session-tokens/consume` | HMAC. `{ token }` → interview, user, repository; 403 `{ reason }` if rejected |
+| GET | `/health` · `/health/db` | Liveness and DB check |
 
-## Running locally
+## Messaging
 
-Prerequisites: Python 3.11+, `uv`, Postgres and LocalStack running (`docker compose up -d` from the repo root).
+| | Queue | Message |
+|---|---|---|
+| Sends | `ingestion-jobs` | `ingestion.requested` |
+| Sends | `planning-jobs` | `plan.requested` |
+| Sends | `report-jobs` | `report.requested` |
+| Consumes | `core-ingestion-events` | `ingestion.started` / `completed` / `failed` |
+| Consumes | `core-interview-events` | `interview.ended` |
+
+## Run locally
+
+Needs Postgres and LocalStack (`docker compose up -d` from the repo root).
 
 ```bash
 uv sync
-cp .env.example .env        # then fill in the values below
+cp .env.example .env
 uv run alembic upgrade head
 uv run uvicorn core_api.main:app --reload --port 8000
-uv run python -m core_api.worker   # interview.ended and ingestion.* events from SQS (decision 057)
+uv run python -m core_api.worker
 ```
 
-Log in by opening `http://localhost:8000/v1/auth/github/login` in a browser.
-
-## Tests
-
-```bash
-uv run pytest
-```
-
-## Environment variables
+## Configuration
 
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | `postgresql+psycopg://...` |
-| `ENV` | `development` or `production` |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | From your GitHub OAuth app |
-| `GITHUB_OAUTH_REDIRECT_URI` | `http://localhost:8000/v1/auth/github/callback` locally |
-| `COOKIE_SECRET` | Signs state and session cookies |
-| `TOKEN_ENCRYPTION_KEY` | Encrypts stored GitHub tokens |
-| `REPOSITORY_SERVICE_BASE_URL` | e.g. `http://127.0.0.1:8001` |
-| `EVALUATION_SERVICE_BASE_URL` | Report trigger and report reads, e.g. `http://127.0.0.1:8003` |
-| `INTERNAL_HMAC_SECRET` | Must match Repository Service's (decision 027) |
-| `SESSION_TOKEN_TTL_MINUTES` | Interview token lifetime if unused (default 5) |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT_URI` | Your GitHub OAuth app |
+| `FRONTEND_BASE_URL` | Where to land after login (default `http://localhost:5173`) |
+| `COOKIE_SECRET`, `TOKEN_ENCRYPTION_KEY` | Sign cookies, encrypt GitHub tokens |
+| `COOKIE_SECURE` | `true` behind HTTPS (production) |
+| `VOICE_SERVICE_BASE_URL`, `EVALUATION_SERVICE_BASE_URL` | Plan and report reads |
+| `INTERNAL_HMAC_SECRET` | Same value in every service (decision 027) |
+| `AWS_*`, `*_QUEUE_URL` | SQS; see `.env.example` (LocalStack locally) |
+| `SESSION_TOKEN_TTL_MINUTES` | Unused token lifetime (default 5) |
+| `ACTIVE_SESSION_CUTOFF_SECONDS` | When an `active` interview counts as overdue (default 2100) |
 
 Generate secrets with `python -c "import secrets; print(secrets.token_hex(32))"`.
 
-## Migrations
-
-Alembic manages only Core API's tables (decision 037):
+## Tests and migrations
 
 ```bash
-uv run alembic revision --autogenerate -m "describe change"
-uv run alembic upgrade head
+uv run ruff check . && uv run pytest
+uv run alembic revision --autogenerate -m "describe change"   # Core API's tables only (decision 037)
 ```
-
-## What's next
-
-`GET /v1/interviews/{id}/report` once Evaluation Service exists, and a fix for interviews stuck in `active` if Voice Service crashes (decision 036's revisit trigger).
