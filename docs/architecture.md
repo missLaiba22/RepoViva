@@ -314,7 +314,7 @@ directories, so it can be passed straight to `/retrieve` as
 `filename_prefix`. Always 200, with `areas: []` for a repository with no
 chunks, like `/retrieve`.
 
-**Implemented (decisions 052, 057; the live page doesn't use it yet).**
+**Implemented (decisions 052, 057, 062; the live page waits for the plan before opening the session).**
 
 Planning starts with a `plan.requested` job `{ interview_id, repository_id }`
 on SQS `planning-jobs`, sent by Core API on `POST /v1/interviews` and by
