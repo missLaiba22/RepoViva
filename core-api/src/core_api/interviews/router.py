@@ -238,6 +238,7 @@ def get_interview_report(
             )
             return _generating(ReportResponse(interview_id=interview.id, status="generating"))
     except evaluation_client.EvaluationServiceError as exc:
+        logger.warning("report read failed: interview_id=%s: %s", interview.id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Reports are unavailable right now; try again shortly",
@@ -285,6 +286,7 @@ def retry_interview_report(
             outcome=interview.status,
         )
     except evaluation_client.EvaluationServiceError as exc:
+        logger.warning("report retry failed: interview_id=%s: %s", interview.id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Reports are unavailable right now; try again shortly",
