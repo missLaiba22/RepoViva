@@ -9,7 +9,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const auth = useAuth();
 
   if (auth.status === "loading") return <PageSpinner />;
-  if (auth.status === "error") return <ConnectionProblem onRetry={auth.retry} />;
+  if (auth.status === "error") return <ConnectionProblem error={auth.error} onRetry={auth.retry} />;
   if (auth.status === "signed-out") return <Navigate to="/" replace />;
   return children;
 }

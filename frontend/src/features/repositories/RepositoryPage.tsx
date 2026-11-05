@@ -45,7 +45,7 @@ export function RepositoryPage() {
         </EmptyState>
       );
     }
-    return <ConnectionProblem onRetry={repo.reload} />;
+    return <ConnectionProblem error={repo.error} onRetry={repo.reload} />;
   }
 
   return (

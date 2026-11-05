@@ -34,7 +34,7 @@ export function ReportPage() {
         </EmptyState>
       );
     }
-    return <ConnectionProblem onRetry={context.reload} />;
+    return <ConnectionProblem error={context.error} onRetry={context.reload} />;
   }
 
   return (
@@ -89,7 +89,7 @@ function ReportBody({ context }: { context: ReportContext }) {
   usePolling(report.reload, POLL_MS, generating);
 
   if (report.state === "loading") return <PageSpinner />;
-  if (report.state === "error") return <ConnectionProblem onRetry={report.reload} />;
+  if (report.state === "error") return <ConnectionProblem error={report.error} onRetry={report.reload} />;
 
   const data = report.data;
   if (data.status === "generating") return <Generating />;

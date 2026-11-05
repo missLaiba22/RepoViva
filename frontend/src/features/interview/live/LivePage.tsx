@@ -38,7 +38,7 @@ function PlanGate({ handoff }: { handoff: LiveHandoff }) {
   const generating = plan.state === "loading" || (plan.state === "ready" && plan.data.plan_status === "generating");
   usePolling(plan.reload, PLAN_POLL_MS, plan.state === "ready" && generating);
 
-  if (plan.state === "error") return <ConnectionProblem onRetry={plan.reload} />;
+  if (plan.state === "error") return <ConnectionProblem error={plan.error} onRetry={plan.reload} />;
   if (plan.state === "ready" && plan.data.plan_status === "ready") return <Live handoff={handoff} />;
   if (plan.state === "ready" && plan.data.plan_status === "failed") {
     return (

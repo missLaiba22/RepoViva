@@ -36,7 +36,7 @@ export function SetupPage() {
         </EmptyState>
       );
     }
-    return <ConnectionProblem onRetry={repo.reload} />;
+    return <ConnectionProblem error={repo.error} onRetry={repo.reload} />;
   }
   if (repo.data.status !== "ready") {
     return (

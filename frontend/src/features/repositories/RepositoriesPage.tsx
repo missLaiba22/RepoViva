@@ -17,7 +17,7 @@ export function RepositoriesPage() {
   usePolling(page.reload, POLL_MS, anyIndexing);
 
   if (page.state === "loading") return <PageSpinner />;
-  if (page.state === "error") return <ConnectionProblem onRetry={page.reload} />;
+  if (page.state === "error") return <ConnectionProblem error={page.error} onRetry={page.reload} />;
 
   const { repositories, interviews } = page.data;
 
