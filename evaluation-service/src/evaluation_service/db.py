@@ -19,7 +19,11 @@ _SCHEMA_SQL_PATH = Path(__file__).resolve().parent.parent.parent / "sql" / "sche
 
 async def init_pool() -> None:
     global _pool
-    _pool = await asyncpg.create_pool(get_settings().database_url)
+    # min_size=0 lets idle connections close: asyncpg never expires those within
+    # min_size, and Neon can drop them silently, hanging the next query for ~15 min.
+    _pool = await asyncpg.create_pool(
+        get_settings().database_url, min_size=0, command_timeout=30
+    )
 
 
 async def apply_schema() -> None:
