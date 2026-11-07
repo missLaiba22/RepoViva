@@ -53,3 +53,14 @@ class RepositoryResponse(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class AreaResponse(BaseModel):
+    path: str
+    chunk_count: int
+
+
+class AreasResponse(BaseModel):
+    """GET /v1/repositories/{id}/areas (decision 065): largest first."""
+
+    areas: list[AreaResponse]

@@ -30,6 +30,7 @@ services:
     environment: &core-env
       VOICE_SERVICE_BASE_URL: http://voice-service:8002
       EVALUATION_SERVICE_BASE_URL: http://evaluation-service:8003
+      REPOSITORY_SERVICE_BASE_URL: http://repository-service:8001
       COOKIE_SECURE: "true"
   core-worker:
     <<: *service

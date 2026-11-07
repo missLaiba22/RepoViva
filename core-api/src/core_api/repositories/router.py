@@ -4,19 +4,23 @@ All endpoints require an authenticated session. Ownership is enforced
 by the service layer — the router just supplies the current user's ID.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from core_api.auth.dependencies import get_current_user
 from core_api.db import get_db
-from core_api.repositories import service
+from core_api.repositories import areas_client, service
 from core_api.repositories.ingestion_client import (
     IngestionTriggerError,
     trigger_ingestion,
 )
 from core_api.repositories.models import Repository, RepositoryStatus
-from core_api.repositories.schemas import RepositoryCreate, RepositoryResponse
+from core_api.repositories.schemas import AreasResponse, RepositoryCreate, RepositoryResponse
 from core_api.users.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/repositories", tags=["repositories"])
 
@@ -148,3 +152,33 @@ def get_repository(
     if repo is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
     return RepositoryResponse.model_validate(repo)
+
+
+@router.get(
+    "/{repository_id}/areas",
+    response_model=AreasResponse,
+    responses={
+        404: {"description": "Repository not found"},
+        503: {"description": "Repository Service unavailable"},
+    },
+)
+def get_repository_areas(
+    repository_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AreasResponse:
+    """The code areas questions come from, largest first (decision 065)."""
+    repo = service.get_repository_for_user(
+        db, repository_id=repository_id, owner_user_id=current_user.id
+    )
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found")
+    try:
+        areas = areas_client.get_areas(repo.id)
+    except areas_client.RepositoryServiceError as exc:
+        logger.warning("areas read failed: repository_id=%s: %s", repo.id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Repository details are unavailable right now; try again shortly",
+        ) from exc
+    return AreasResponse.model_validate({"areas": areas})

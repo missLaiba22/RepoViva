@@ -63,6 +63,7 @@ uv run python -m core_api.worker
 | `COOKIE_SECRET`, `TOKEN_ENCRYPTION_KEY` | Sign cookies, encrypt GitHub tokens |
 | `COOKIE_SECURE` | `true` behind HTTPS (production) |
 | `VOICE_SERVICE_BASE_URL`, `EVALUATION_SERVICE_BASE_URL` | Plan and report reads |
+| `REPOSITORY_SERVICE_BASE_URL` | A repository's code areas |
 | `INTERNAL_HMAC_SECRET` | Same value in every service (decision 027) |
 | `AWS_*`, `*_QUEUE_URL` | SQS; see `.env.example` (LocalStack locally) |
 | `SESSION_TOKEN_TTL_MINUTES` | Unused token lifetime (default 5) |

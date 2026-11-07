@@ -3210,3 +3210,47 @@ them above the question.
 
 **Revisit when:**
 Questions span several areas, or the page should point at exact files.
+
+## 065 — The repository page shows the repository's code areas
+
+*Status: decided and implemented 2026-11-08.*
+
+**Context:**
+The repository page showed only status and a start button, so users
+couldn't see what RepoViva had analyzed before an interview. The
+repository's areas (decisions 052, 060) already exist in Repository
+Service, behind its internal `/areas` endpoint, which only Voice Service
+called.
+
+**Decision:**
+Core API adds `GET /v1/repositories/{id}/areas`. It checks ownership
+(404 otherwise), then queries Repository Service's existing
+`GET /internal/v1/repositories/{id}/areas` with `limit` 6, Voice
+Service's default `MAX_QUESTIONS`. With the same limit, `pick_areas`
+returns the same areas the question plan uses. Response:
+`{ areas: [ { path, chunk_count } ] }`, largest first; `[]` before the
+repository is indexed. 503 if Repository Service can't be read. The
+Repository Service contract doesn't change.
+
+The page shows the areas with their relative size, plus general notes
+on which files RepoViva reads. If the areas can't be loaded, the page
+hides the list and keeps the rest.
+
+**Options considered:**
+- **Repository Service publishes a summary with `ingestion.completed`,
+  and Core API stores it.** Core API would hold a copy of data Repository
+  Service owns, and it needs a new event field and a migration.
+- **Static explanation only.** No new contract, but identical for every
+  repository.
+
+**Tradeoff:**
+- A new query from Core API to Repository Service, and a new
+  `REPOSITORY_SERVICE_BASE_URL` setting in Core API.
+- The limit is a copy of Voice's `MAX_QUESTIONS`; if that changes, this
+  one must change with it, or the page lists different areas from the
+  ones questions come from.
+- Areas give folders and sizes only, not languages or frameworks.
+
+**Revisit when:**
+The page should show languages, frameworks or files (then the endpoint's
+contract grows), or `MAX_QUESTIONS` becomes configurable per interview.

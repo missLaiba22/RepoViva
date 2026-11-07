@@ -45,6 +45,7 @@ flowchart TB
     EVAL -->|"fetch turns"| VOICE
     EVAL -->|"fetch chunks by id"| REPO
     VOICE -->|"areas, retrieval"| REPO
+    CORE -->|"areas"| REPO
     VOICE -->|"consume token"| CORE
 
     CORE --> DB
@@ -74,6 +75,7 @@ Main REST entry point for the frontend. Owns:
 - Repository metadata (with ingestion status)
 - Interview metadata (creation, listing, session token issuance and consumption)
 - Report access for the frontend: checks ownership, then proxies to Evaluation Service, which owns the report and its status (decision 049)
+- A repository's code areas for the frontend: checks ownership, then proxies to Repository Service (decision 065)
 
 Delegates:
 
@@ -91,7 +93,7 @@ Owns everything about a repository's code and its searchable representation:
 - Fetches the repository from GitHub
 - Parses, chunks, and embeds source code
 - Persists chunks + embeddings (pgvector) to the shared database
-- Exposes the areas and retrieval endpoints Voice Service uses to plan interviews (decisions 052, 060)
+- Exposes the areas and retrieval endpoints Voice Service uses to plan interviews (decisions 052, 060); Core API reads the areas for the repository page (decision 065)
 - Publishes ingestion progress as `ingestion.*` events, which Core API consumes (decisions 029, 057)
 
 Runs ingestion in a worker that consumes `ingestion-jobs`, separate from its API process. See "Data Flow" below.
@@ -161,6 +163,10 @@ GET  /v1/repositories/{id}       single repo, including ingestion status
 POST /v1/repositories/{id}/retry a failed repo goes back to `queued` and its ingestion
                                  job is sent again: 202; any other repo is returned as
                                  is: 200; 404 if missing or not yours (decision 061)
+GET  /v1/repositories/{id}/areas { areas: [ { path, chunk_count } ] }, the areas questions
+                                 come from, largest first; [] before indexing; 404 if
+                                 missing or not yours; 503 if Repository Service is down
+                                 (decision 065)
 ```
 
 Interviews
@@ -304,6 +310,7 @@ body: { ids: int[] }   // 1–200
 **Implemented (decision 052).**
 
 Voice Service → Repository Service (areas, for question planning)
+Core API → Repository Service (areas, for the repository page, limit 6; decision 065)
 ```
 GET /internal/v1/repositories/{repository_id}/areas?limit=6   // 1–50
 → 200 { areas: [ { path, chunk_count } ] }   // largest first
