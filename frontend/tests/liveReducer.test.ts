@@ -6,8 +6,8 @@ const server = (message: ServerMessage): LiveEvent => ({ type: "server", message
 const run = (events: LiveEvent[], from: LiveState = initialLiveState) => events.reduce(liveReducer, from);
 
 const asked = (seq = 1): LiveEvent[] => [
-  server({ type: "question.text", turn_id: seq * 10, seq, text: `Question ${seq}?` }),
-  server({ type: "question.audio_end", turn_id: seq * 10 }),
+  server({ type: "question.text", seq, text: `Question ${seq}?` }),
+  server({ type: "question.audio_end", seq }),
   { type: "question_heard" },
 ];
 
@@ -16,24 +16,41 @@ describe("liveReducer", () => {
     let state = run([server({ type: "session.ready", interview_id: 21 })]);
     expect(state.phase).toBe("preparing");
 
-    state = run([server({ type: "question.text", turn_id: 10, seq: 1, text: "Why sort the items?" })], state);
+    state = run([server({ type: "question.text", seq: 1, text: "Why sort the items?" })], state);
     expect(state).toMatchObject({ phase: "asking", seq: 1, question: "Why sort the items?", audioComplete: false });
 
-    state = run([server({ type: "question.audio_end", turn_id: 10 })], state);
+    state = run([server({ type: "question.audio_end", seq: 1 })], state);
     expect(state).toMatchObject({ phase: "asking", audioComplete: true });
 
     state = run([{ type: "question_heard" }, { type: "record_started" }], state);
     expect(state.phase).toBe("recording");
 
-    state = run([{ type: "answer_sent" }, server({ type: "transcript.final", turn_id: 10, text: "To avoid deadlocks." })], state);
+    state = run([{ type: "answer_sent" }, server({ type: "transcript.final", seq: 1, text: "To avoid deadlocks." })], state);
     expect(state).toMatchObject({ phase: "sending", transcript: "To avoid deadlocks." });
 
-    state = run([server({ type: "turn.complete", turn_id: 10 })], state);
+    state = run([server({ type: "turn.complete", seq: 1 })], state);
     expect(state).toMatchObject({ phase: "preparing", answered: 1, transcript: "To avoid deadlocks." });
   });
 
+  it("keeps the question's area and topic", () => {
+    const state = run([
+      server({ type: "session.ready", interview_id: 1 }),
+      server({ type: "question.text", seq: 1, text: "Q", area: "src/auth/", topic: "Token refresh" }),
+    ]);
+    expect(state).toMatchObject({ area: "src/auth/", topic: "Token refresh" });
+  });
+
+  it("ignores audio_end for another question (it matched on a turn_id the server never sends)", () => {
+    const state = run([
+      server({ type: "session.ready", interview_id: 1 }),
+      server({ type: "question.text", seq: 2, text: "Q2" }),
+      server({ type: "question.audio_end", seq: 1 }),
+    ]);
+    expect(state.audioComplete).toBe(false);
+  });
+
   it("can't record before the question has been heard", () => {
-    const state = run([server({ type: "session.ready", interview_id: 1 }), server({ type: "question.text", turn_id: 10, seq: 1, text: "Q" }), { type: "record_started" }]);
+    const state = run([server({ type: "session.ready", interview_id: 1 }), server({ type: "question.text", seq: 1, text: "Q" }), { type: "record_started" }]);
     expect(state.phase).toBe("asking");
   });
 
@@ -95,7 +112,7 @@ describe("liveReducer", () => {
     const ending = run([server({ type: "session.ready", interview_id: 1 }), ...asked(), { type: "end_requested" }]);
     expect(ending.phase).toBe("ending");
     // A question generated meanwhile doesn't pull the page back into the interview.
-    expect(run([server({ type: "question.text", turn_id: 20, seq: 2, text: "Q2" })], ending).phase).toBe("ending");
+    expect(run([server({ type: "question.text", seq: 2, text: "Q2" })], ending).phase).toBe("ending");
     expect(run([{ type: "closed", code: 1000 }], ending)).toMatchObject({ phase: "done", outcome: "ended_by_client" });
     expect(run([server({ type: "session.end", reason: "ended_by_client" })], ending)).toMatchObject({
       phase: "done",

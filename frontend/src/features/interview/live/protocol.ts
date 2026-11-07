@@ -9,10 +9,11 @@ export type ClientMessage =
 export type ServerMessage =
   /** question_count: the plan's length (decision 062); absent from an older Voice Service. */
   | { type: "session.ready"; interview_id: number; question_count?: number }
-  | { type: "question.text"; turn_id: number; seq: number; text: string }
-  | { type: "question.audio_end"; turn_id: number }
-  | { type: "transcript.final"; turn_id: number; text: string }
-  | { type: "turn.complete"; turn_id: number }
+  /** area, topic: the code the question is about (decision 064); absent from an older Voice Service. */
+  | { type: "question.text"; seq: number; text: string; area?: string; topic?: string }
+  | { type: "question.audio_end"; seq: number }
+  | { type: "transcript.final"; seq: number; text: string }
+  | { type: "turn.complete"; seq: number }
   | { type: "session.end"; reason: "completed" | "ended_by_client" }
   | { type: "error"; code: string; message: string };
 

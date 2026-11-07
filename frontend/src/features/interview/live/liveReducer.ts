@@ -26,12 +26,18 @@ export interface LiveState {
   seq: number;
   /** How many questions the interview has; null until session.ready says. */
   total: number | null;
-  turnId: number | null;
   question: string | null;
+  /** The repository area (a path) and topic the question is about. */
+  area: string | null;
+  topic: string | null;
   /** The question's audio has fully arrived (question.audio_end). */
   audioComplete: boolean;
   /** What the server heard for the last answer. */
   transcript: string | null;
+  /** Recording, but the mic is held: no audio is sent. */
+  paused: boolean;
+  /** Length of the last spoken answer, excluding pauses; null for typed. */
+  answerSeconds: number | null;
   /** A recoverable problem to show next to the mic. */
   notice: string | null;
   answered: number;
@@ -43,7 +49,9 @@ export type LiveEvent =
   | { type: "server"; message: ServerMessage }
   | { type: "question_heard" }
   | { type: "record_started" }
-  | { type: "answer_sent" }
+  | { type: "record_paused" }
+  | { type: "record_resumed" }
+  | { type: "answer_sent"; seconds?: number }
   | { type: "end_requested" }
   | { type: "closed"; code: number };
 
@@ -51,10 +59,13 @@ export const initialLiveState: LiveState = {
   phase: "connecting",
   seq: 0,
   total: null,
-  turnId: null,
   question: null,
+  area: null,
+  topic: null,
   audioComplete: false,
   transcript: null,
+  paused: false,
+  answerSeconds: null,
   notice: null,
   answered: 0,
   outcome: null,
@@ -73,7 +84,11 @@ const FINISHED: Phase[] = ["done", "failed"];
 
 export function liveReducer(state: LiveState, event: LiveEvent): LiveState {
   if (FINISHED.includes(state.phase)) return state;
+  const next = reduce(state, event);
+  return next.paused && next.phase !== "recording" ? { ...next, paused: false } : next;
+}
 
+function reduce(state: LiveState, event: LiveEvent): LiveState {
   switch (event.type) {
     case "server":
       return onServer(state, event.message);
@@ -82,11 +97,17 @@ export function liveReducer(state: LiveState, event: LiveEvent): LiveState {
       return state.phase === "asking" ? { ...state, phase: "answering" } : state;
 
     case "record_started":
-      return state.phase === "answering" ? { ...state, phase: "recording", notice: null } : state;
+      return state.phase === "answering" ? { ...state, phase: "recording", paused: false, notice: null } : state;
+
+    case "record_paused":
+      return state.phase === "recording" ? { ...state, paused: true } : state;
+
+    case "record_resumed":
+      return state.phase === "recording" ? { ...state, paused: false } : state;
 
     case "answer_sent":
       return state.phase === "answering" || state.phase === "recording"
-        ? { ...state, phase: "sending", notice: null }
+        ? { ...state, phase: "sending", answerSeconds: event.seconds ?? null, notice: null }
         : state;
 
     case "end_requested":
@@ -115,15 +136,17 @@ function onServer(state: LiveState, msg: ServerMessage): LiveState {
         ...state,
         phase: "asking",
         seq: msg.seq,
-        turnId: msg.turn_id,
         question: msg.text,
+        area: msg.area ?? null,
+        topic: msg.topic ?? null,
         audioComplete: false,
         transcript: null,
+        answerSeconds: null,
         notice: null,
       };
 
     case "question.audio_end":
-      return msg.turn_id === state.turnId ? { ...state, audioComplete: true } : state;
+      return msg.seq === state.seq ? { ...state, audioComplete: true } : state;
 
     case "transcript.final":
       return { ...state, transcript: msg.text };

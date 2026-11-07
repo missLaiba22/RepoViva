@@ -20,8 +20,12 @@ export interface LiveInterview {
   replay: () => void;
   skipAudio: () => void;
   level: () => number;
+  /** Seconds recorded so far in this answer, pauses excluded. */
   recordingSeconds: number;
   startRecording: () => void;
+  /** Hold the mic mid-answer; time paused doesn't count toward the limit. */
+  pauseRecording: () => void;
+  resumeRecording: () => void;
   stopRecording: () => void;
   sendText: (text: string) => void;
   end: () => void;
@@ -37,6 +41,14 @@ export function useLiveInterview(handoff: LiveHandoff): LiveInterview {
   const socket = useRef<WebSocket | null>(null);
   const player = useRef<QuestionPlayer | null>(null);
   const capture = useRef<Capture | null>(null);
+  const sink = useRef<((pcm: ArrayBuffer) => void) | null>(null);
+  // Answer time counts only while audio flows, like the server's byte cap.
+  const elapsedMs = useRef(0);
+  const runningSince = useRef<number | null>(null);
+  const activeMs = useCallback(
+    () => elapsedMs.current + (runningSince.current === null ? 0 : Date.now() - runningSince.current),
+    [],
+  );
   // Handlers run outside render (socket events, timers), so they read the
   // phase through a ref kept in step with state.
   const phase = useRef(state.phase);
@@ -125,32 +137,52 @@ export function useLiveInterview(handoff: LiveHandoff): LiveInterview {
     if (phase.current !== "recording") return;
     capture.current?.pause(); // flushes the last chunk before audio.end
     send({ type: "audio.end" });
-    dispatch({ type: "answer_sent" });
-  }, [send]);
+    const seconds = Math.round(activeMs() / 1000);
+    runningSince.current = null;
+    dispatch({ type: "answer_sent", seconds });
+  }, [send, activeMs]);
 
   const startRecording = useCallback(() => {
     const mic = capture.current;
     const ws = socket.current;
     if (!mic || !ws || phase.current !== "answering") return;
     player.current?.stop();
-    mic.record((pcm) => {
+    sink.current = (pcm) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(pcm);
-    });
+    };
+    mic.record(sink.current);
+    elapsedMs.current = 0;
+    runningSince.current = Date.now();
     setRecordingSeconds(0);
     dispatch({ type: "record_started" });
   }, []);
 
+  const pauseRecording = useCallback(() => {
+    if (phase.current !== "recording" || runningSince.current === null) return;
+    capture.current?.pause();
+    elapsedMs.current = activeMs();
+    runningSince.current = null;
+    dispatch({ type: "record_paused" });
+  }, [activeMs]);
+
+  const resumeRecording = useCallback(() => {
+    const mic = capture.current;
+    if (!mic || !sink.current || phase.current !== "recording" || runningSince.current !== null) return;
+    mic.record(sink.current);
+    runningSince.current = Date.now();
+    dispatch({ type: "record_resumed" });
+  }, []);
+
   // The answer timer, and the automatic stop just before the server's limit.
   useEffect(() => {
-    if (state.phase !== "recording") return;
-    const started = Date.now();
+    if (state.phase !== "recording" || state.paused) return;
     const id = window.setInterval(() => {
-      const seconds = Math.floor((Date.now() - started) / 1000);
+      const seconds = Math.floor(activeMs() / 1000);
       setRecordingSeconds(seconds);
       if (seconds >= MAX_ANSWER_SECONDS) stopRecording();
     }, 250);
     return () => window.clearInterval(id);
-  }, [state.phase, stopRecording]);
+  }, [state.phase, state.paused, stopRecording, activeMs]);
 
   // An end request the server never confirms (it only reads messages
   // between turns) still ends, by closing the socket.
@@ -210,6 +242,8 @@ export function useLiveInterview(handoff: LiveHandoff): LiveInterview {
     level,
     recordingSeconds,
     startRecording,
+    pauseRecording,
+    resumeRecording,
     stopRecording,
     sendText,
     end,

@@ -1,0 +1,12 @@
+.wave {
+  display: block;
+  width: 100%;
+  height: 3.5rem;
+  color: var(--danger);
+  transition: color 150ms ease, opacity 150ms ease;
+}
+
+.paused {
+  color: var(--text-muted);
+  opacity: 0.6;
+}

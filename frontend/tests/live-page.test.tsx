@@ -105,9 +105,9 @@ async function startLive(handoff: object = HANDOFF) {
 
 async function askQuestion(ws: FakeSocket, seq: number, text: string) {
   act(() => {
-    ws.push({ type: "question.text", turn_id: seq * 10, seq, text });
+    ws.push({ type: "question.text", seq, text });
     ws.push(new ArrayBuffer(4800));
-    ws.push({ type: "question.audio_end", turn_id: seq * 10 });
+    ws.push({ type: "question.audio_end", seq });
   });
   await screen.findByText(text);
 }
@@ -145,8 +145,8 @@ describe("live interview", () => {
     expect(screen.getByText(/transcribing/i)).toBeInTheDocument();
 
     act(() => {
-      ws.push({ type: "transcript.final", turn_id: 10, text: "So two checkouts never deadlock." });
-      ws.push({ type: "turn.complete", turn_id: 10 });
+      ws.push({ type: "transcript.final", seq: 1, text: "So two checkouts never deadlock." });
+      ws.push({ type: "turn.complete", seq: 1 });
     });
     expect(screen.getByText("So two checkouts never deadlock.")).toBeInTheDocument();
     expect(screen.getByText(/loading the next question/i)).toBeInTheDocument();

@@ -9,12 +9,11 @@ import { Spinner } from "../../../components/Spinner";
 import { usePolling } from "../../../hooks/usePolling";
 import { useResource } from "../../../hooks/useResource";
 import { getPlan, retryPlan, type LiveHandoff } from "../api";
-import { LevelMeter } from "../LevelMeter";
 import { MicButton } from "./MicButton";
 import type { Failure } from "./liveReducer";
 import { MAX_ANSWER_SECONDS, MAX_TEXT_ANSWER } from "./protocol";
 import { useLiveInterview, type LiveInterview } from "./useLiveInterview";
-import { useLevel } from "./useLevel";
+import { Waveform } from "./Waveform";
 import styles from "./LivePage.module.css";
 
 /** The live interview: a focused room with the question, the mic and little else. */
@@ -161,10 +160,13 @@ function Live({ handoff }: { handoff: LiveHandoff }) {
         ) : (
           <>
             <section className={styles.questionBlock}>
-              <p className={styles.counter}>
-                Question {questionNumber}
-                {state.total ? ` of ${state.total}` : ""}
-              </p>
+              <div className={styles.questionMeta}>
+                <p className={styles.counter}>
+                  Question {questionNumber}
+                  {state.total ? ` of ${state.total}` : ""}
+                </p>
+                {state.area && <QuestionContext area={state.area} topic={state.topic} />}
+              </div>
               <h1 className={styles.question} aria-live="polite">
                 {state.question}
               </h1>
@@ -230,6 +232,19 @@ function Waiting({ text }: { text: string }) {
   );
 }
 
+/** The part of the repository the question is about: a directory (ends in "/") or a file. */
+function QuestionContext({ area, topic }: { area: string; topic: string | null }) {
+  return (
+    <p className={styles.context}>
+      <span className={styles.area} title={area}>
+        <Icon name={area.endsWith("/") ? "folder" : "file"} size={14} />
+        <span className={styles.areaPath}>{area}</span>
+      </span>
+      {topic && <span className={styles.topic}>{topic}</span>}
+    </p>
+  );
+}
+
 function QuestionAudio({ live }: { live: LiveInterview }) {
   const { state } = live;
   if (live.audioBlocked) {
@@ -290,7 +305,15 @@ function AnswerArea({ live }: { live: LiveInterview }) {
       <div className={styles.panel}>
         {state.transcript && (
           <div className={styles.heard}>
-            <p className={styles.heardLabel}>What we heard</p>
+            <p className={styles.heardLabel}>
+              What we heard
+              {state.answerSeconds !== null && (
+                <span className={styles.heardLength}>
+                  <Icon name="clock" size={14} />
+                  {formatSeconds(state.answerSeconds)}
+                </span>
+              )}
+            </p>
             <p className={styles.heardText}>{state.transcript}</p>
           </div>
         )}
@@ -343,33 +366,58 @@ function AnswerArea({ live }: { live: LiveInterview }) {
 function SpokenAnswer({ live }: { live: LiveInterview }) {
   const { state } = live;
   const recording = state.phase === "recording";
+  const paused = recording && state.paused;
   const ready = state.phase === "answering";
-  const level = useLevel(live.level, recording);
   const remaining = MAX_ANSWER_SECONDS - live.recordingSeconds;
   const low = remaining <= 20;
 
   return (
     <div className={styles.spoken}>
-      <MicButton recording={recording} disabled={!ready && !recording} onClick={recording ? live.stopRecording : live.startRecording} />
+      <div className={styles.controls}>
+        {recording && (
+          <button
+            type="button"
+            className={styles.pauseButton}
+            onClick={paused ? live.resumeRecording : live.pauseRecording}
+            aria-label={paused ? "Resume answering" : "Pause answering"}
+            aria-pressed={paused}
+          >
+            <Icon name={paused ? "mic" : "pause"} size={20} strokeWidth={2} />
+          </button>
+        )}
+        <MicButton recording={recording} disabled={!ready && !recording} onClick={recording ? live.stopRecording : live.startRecording} />
+        {recording && <span className={styles.controlSpacer} aria-hidden="true" />}
+      </div>
 
       <div className={styles.micStatus} aria-live="polite">
         {recording ? (
           <>
             <p className={styles.recordingLine}>
-              <span className={styles.listening}>
-                <span className={styles.recDot} aria-hidden="true" />
-                Listening
+              {paused ? (
+                <span className={styles.pausedBadge}>Paused</span>
+              ) : (
+                <span className={styles.listening}>
+                  <span className={styles.recDot} aria-hidden="true" />
+                  Listening
+                </span>
+              )}
+              <span className={low ? styles.timerLow : styles.timer}>
+                {formatSeconds(live.recordingSeconds)}
+                <span className={styles.timerLimit}> / {formatSeconds(MAX_ANSWER_SECONDS)}</span>
               </span>
-              <span className={low ? styles.timerLow : styles.timer}>{formatSeconds(live.recordingSeconds)}</span>
             </p>
             <p className={low ? styles.micHintLow : styles.micHint}>
-              {low ? `${remaining}s left. Tap the square to send.` : "Tap the square when you’re done."}
+              {low
+                ? `${remaining}s left. Tap the square to send.`
+                : paused
+                  ? "Take a moment. The interview clock keeps running."
+                  : "Tap the square when you’re done, or pause to think."}
             </p>
           </>
         ) : ready ? (
           <>
             <p className={styles.micTitle}>Tap to answer</p>
-            <p className={styles.micHint}>Speak naturally. You can take your time.</p>
+            <p className={styles.micHint}>Speak naturally. You can pause to think.</p>
           </>
         ) : (
           <p className={styles.micHint}>The mic opens after the question</p>
@@ -378,7 +426,20 @@ function SpokenAnswer({ live }: { live: LiveInterview }) {
 
       {recording && (
         <div className={styles.meter}>
-          <LevelMeter level={level} label="Your voice" />
+          <Waveform read={live.level} paused={paused} />
+          <div
+            className={styles.answerTrack}
+            role="progressbar"
+            aria-label="Answer length"
+            aria-valuemin={0}
+            aria-valuemax={MAX_ANSWER_SECONDS}
+            aria-valuenow={live.recordingSeconds}
+          >
+            <span
+              className={low ? styles.answerFillLow : styles.answerFill}
+              style={{ width: `${Math.min(100, (live.recordingSeconds / MAX_ANSWER_SECONDS) * 100)}%` }}
+            />
+          </div>
         </div>
       )}
     </div>
