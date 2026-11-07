@@ -3,6 +3,33 @@
   gap: var(--space-6);
 }
 
+.lead {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.seeAll {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.seeAll:hover {
+  text-decoration: underline;
+}
+
 .github {
   display: inline-flex;
   align-items: center;
@@ -48,6 +75,67 @@
 
 .body {
   color: var(--text-muted);
+}
+
+.stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.stages li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.stageDot {
+  display: grid;
+  place-items: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+
+.done {
+  color: var(--text-muted);
+}
+
+.done .stageDot {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.now {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.now .stageDot {
+  border: 2px solid var(--primary);
+  animation: stage-pulse 1.4s ease-in-out infinite;
+}
+
+.todo {
+  color: var(--text-muted);
+}
+
+@keyframes stage-pulse {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 20%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now .stageDot {
+    animation: none;
+  }
 }
 
 .meta {

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { listInterviews } from "../../api/interviews";
 import type { Repository } from "../../api/types";
@@ -22,13 +22,14 @@ import { INTERVIEW_FACTS } from "../../lib/interviewFacts";
 import { formatRelative, repoName } from "../../lib/format";
 import { getRepository, isIndexing, retryRepository } from "./api";
 import { PROBLEM_TITLE, repositoryProblem } from "./problem";
+import { RepositoryOverview } from "./RepositoryOverview";
 import { StatusChip } from "./StatusChip";
 import styles from "./RepositoryPage.module.css";
 
 const POLL_MS = 2000;
 
-/** One repository's home: its status, the way into an interview, and its
- * past interviews with their reports. */
+/** One repository's home and the one place an interview starts: its status,
+ * what was analyzed, and its latest interviews. */
 export function RepositoryPage() {
   const id = Number(useParams().id);
   const alreadyConnected = Boolean((useLocation().state as { alreadyConnected?: boolean } | null)?.alreadyConnected);
@@ -40,7 +41,7 @@ export function RepositoryPage() {
   if (repo.state === "error") {
     if (repo.error instanceof ApiError && (repo.error.status === 404 || repo.error.status === 422)) {
       return (
-        <EmptyState title="Repository not found" action={<ButtonLink to="/repositories">Back to repositories</ButtonLink>}>
+        <EmptyState icon="repo" title="Repository not found" action={<ButtonLink to="/repositories">Back to repositories</ButtonLink>}>
           It may have been removed, or it belongs to another account.
         </EmptyState>
       );
@@ -48,12 +49,27 @@ export function RepositoryPage() {
     return <ConnectionProblem error={repo.error} onRetry={repo.reload} />;
   }
 
+  const ready = repo.data.status === "ready";
+
   return (
     <div className={styles.page}>
       <PageHeader
         crumbs={[REPOSITORIES_CRUMB]}
         title={<RepoName githubUrl={repo.data.github_url} />}
-        lead={<GitHubLink githubUrl={repo.data.github_url} />}
+        lead={
+          <div className={styles.lead}>
+            <GitHubLink githubUrl={repo.data.github_url} />
+            {ready && <Facts items={INTERVIEW_FACTS} label="About the interview" />}
+          </div>
+        }
+        actions={
+          ready && (
+            <ButtonLink to={`/repositories/${repo.data.id}/interview`} size="large">
+              Start interview
+              <Icon name="arrow" size={18} />
+            </ButtonLink>
+          )
+        }
       />
 
       {alreadyConnected && (
@@ -62,33 +78,50 @@ export function RepositoryPage() {
         </p>
       )}
 
-      <Card className={styles.card}>
-        <StatusPanel repository={repo.data} onRetried={repo.set} />
-      </Card>
-
-      {repo.data.status === "ready" && <PastInterviews repositoryId={repo.data.id} />}
+      {ready ? (
+        <>
+          <RepositoryOverview repository={repo.data} />
+          <RecentInterviews repositoryId={repo.data.id} />
+        </>
+      ) : (
+        <Card className={styles.card}>
+          <StatusPanel repository={repo.data} onRetried={repo.set} />
+        </Card>
+      )}
     </div>
   );
 }
 
-/** Quietly absent if the list can't load: the page's job is the status. */
-function PastInterviews({ repositoryId }: { repositoryId: number }) {
+const RECENT = 3;
+
+/** The latest few; the Reports page holds the full history. Quietly absent
+ * if the list can't load: the page's job is the repository. */
+function RecentInterviews({ repositoryId }: { repositoryId: number }) {
   const load = useCallback(
     () => listInterviews().then((all) => all.filter((i) => i.repository_id === repositoryId)),
     [repositoryId],
   );
   const interviews = useResource(load);
   if (interviews.state !== "ready") return null;
+  const all = interviews.data;
 
   return (
     <section className={styles.section} aria-labelledby="past-heading">
-      <h2 id="past-heading" className={styles.sectionTitle}>
-        Your interviews
-      </h2>
-      {interviews.data.length === 0 ? (
-        <p className={styles.none}>No interviews yet</p>
+      <div className={styles.sectionHead}>
+        <h2 id="past-heading" className={styles.sectionTitle}>
+          Recent interviews
+        </h2>
+        {all.length > RECENT && (
+          <Link to={`/interviews?repository=${repositoryId}`} className={styles.seeAll}>
+            All {all.length} in Reports
+            <Icon name="arrow" size={14} />
+          </Link>
+        )}
+      </div>
+      {all.length === 0 ? (
+        <p className={styles.none}>No interviews yet. Your reports will appear here.</p>
       ) : (
-        <InterviewList interviews={interviews.data} label="Your interviews" />
+        <InterviewList interviews={all.slice(0, RECENT)} label="Recent interviews" />
       )}
     </section>
   );
@@ -104,6 +137,8 @@ function GitHubLink({ githubUrl }: { githubUrl: string }) {
   );
 }
 
+const STAGES = ["Waiting to start", "Reading and indexing your code", "Ready to practice"];
+
 function StatusPanel({ repository, onRetried }: { repository: Repository; onRetried: (repo: Repository) => void }) {
   const { status } = repository;
 
@@ -115,24 +150,24 @@ function StatusPanel({ repository, onRetried }: { repository: Repository; onRetr
           <StatusChip status={status} />
         </div>
         <ProgressBar label="Preparing" />
+        <ol className={styles.stages} aria-label="Preparation stages">
+          {STAGES.map((stage, index) => {
+            const at = status === "queued" ? 0 : 1;
+            const state = index < at ? "done" : index === at ? "now" : "todo";
+            return (
+              <li key={stage} className={styles[state]} aria-current={state === "now" ? "step" : undefined}>
+                <span className={styles.stageDot} aria-hidden="true">
+                  {state === "done" && <Icon name="check" size={12} />}
+                </span>
+                {stage}
+              </li>
+            );
+          })}
+        </ol>
         <p className={styles.meta}>
-          Started {formatRelative(repository.created_at)} · usually a few minutes · you can leave this page
+          Started {formatRelative(repository.created_at)} · usually a few minutes · you can leave this page, it
+          keeps going
         </p>
-      </div>
-    );
-  }
-
-  if (status === "ready") {
-    return (
-      <div className={styles.panel} aria-live="polite">
-        <h2 className={styles.panelTitle}>Ready to practice</h2>
-        <Facts items={INTERVIEW_FACTS} label="About the interview" />
-        <div className={styles.actions}>
-          <ButtonLink to={`/repositories/${repository.id}/interview`} size="large">
-            Start interview
-            <Icon name="arrow" size={18} />
-          </ButtonLink>
-        </div>
       </div>
     );
   }

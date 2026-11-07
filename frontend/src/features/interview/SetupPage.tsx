@@ -31,7 +31,7 @@ export function SetupPage() {
   if (repo.state === "error") {
     if (repo.error instanceof ApiError && (repo.error.status === 404 || repo.error.status === 422)) {
       return (
-        <EmptyState title="Repository not found" action={<ButtonLink to="/repositories">Back to repositories</ButtonLink>}>
+        <EmptyState icon="repo" title="Repository not found" action={<ButtonLink to="/repositories">Back to repositories</ButtonLink>}>
           It may have been removed, or it belongs to another account.
         </EmptyState>
       );
@@ -41,6 +41,7 @@ export function SetupPage() {
   if (repo.data.status !== "ready") {
     return (
       <EmptyState
+        icon="clock"
         title="This repository isn't ready yet"
         action={<ButtonLink to={`/repositories/${id}`}>See progress</ButtonLink>}
       >
@@ -57,7 +58,7 @@ function Setup({ repository }: { repository: Repository }) {
   const [mode, setMode] = useState<AnswerMode>(micSupported() ? "voice" : "text");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const typeId = useId();
+  const modeName = useId();
   const { name } = repoName(repository.github_url);
 
   const micReady = check.state === "live" && check.heard;
@@ -90,76 +91,122 @@ function Setup({ repository }: { repository: Repository }) {
     }
   }
 
+  function choose(next: AnswerMode) {
+    setMode(next);
+    if (next === "text") stop();
+  }
+
   return (
     <div className={styles.page}>
       <PageHeader
         crumbs={[REPOSITORIES_CRUMB, { label: name, to: `/repositories/${repository.id}` }]}
-        title="Before you start"
-        lead={<RepoName githubUrl={repository.github_url} />}
+        title="Get ready"
+        lead={
+          <div className={styles.lead}>
+            <RepoName githubUrl={repository.github_url} />
+            <Facts items={INTERVIEW_FACTS} label="About the interview" />
+          </div>
+        }
       />
 
-      <Facts items={INTERVIEW_FACTS} label="What to expect" />
-
       <Card className={styles.card}>
-        <header className={styles.cardHead}>
-          <h2 className={styles.cardTitle}>Audio check</h2>
-          <p className={styles.muted}>Takes a few seconds. Check both before you begin.</p>
-        </header>
+        <section className={styles.section} aria-label="Answer mode">
+          <h2 className={styles.sectionTitle}>How will you answer?</h2>
+          <div className={styles.modes} role="radiogroup" aria-label="Answer mode">
+            <ModeOption
+              name={modeName}
+              value="voice"
+              checked={mode === "voice"}
+              onChange={choose}
+              disabled={!micSupported()}
+              icon="mic"
+              title="Speak my answers"
+              hint={micSupported() ? "Like a real interview" : "Not available in this browser"}
+            />
+            <ModeOption
+              name={modeName}
+              value="text"
+              checked={mode === "text"}
+              onChange={choose}
+              icon="keyboard"
+              title="Type my answers"
+              hint="No microphone needed"
+            />
+          </div>
+        </section>
 
-        {mode === "text" ? (
-          <Row
-            icon="mic"
-            title="Microphone"
-            status={<Status tone="neutral">Off</Status>}
-            hint={<>You&rsquo;ll type your answers.</>}
-          />
-        ) : (
-          <MicRow check={check} onStart={start} />
-        )}
-
+        {mode === "voice" && <MicRow check={check} onStart={start} />}
         <SpeakerRow />
 
-        {micSupported() && (
-          <label htmlFor={typeId} className={styles.toggle}>
-            <input
-              id={typeId}
-              type="checkbox"
-              checked={mode === "text"}
-              onChange={(e) => {
-                const next = e.target.checked ? "text" : "voice";
-                setMode(next);
-                if (next === "text") stop();
-              }}
-            />
-            Type my answers instead of speaking
-          </label>
-        )}
+        <footer className={styles.footer}>
+          {startError && (
+            <p className={styles.error} role="alert">
+              <Icon name="alert" size={16} />
+              {startError}
+            </p>
+          )}
+          <div className={styles.startRow}>
+            <Button size="large" onClick={handleStart} disabled={!canStart}>
+              {starting ? "Starting…" : "Start interview"}
+              {!starting && <Icon name="arrow" size={18} />}
+            </Button>
+            {!canStart && !starting && (
+              <span className={styles.muted}>
+                {check.state === "live"
+                  ? "Say a few words to finish the microphone check."
+                  : "Check your microphone to continue."}
+              </span>
+            )}
+          </div>
+        </footer>
       </Card>
 
-      <div className={styles.footer}>
-        {startError && (
-          <p className={styles.error} role="alert">
-            <Icon name="alert" size={16} />
-            {startError}
-          </p>
-        )}
-        <div className={styles.startRow}>
-          <Button size="large" onClick={handleStart} disabled={!canStart}>
-            {starting ? "Starting…" : "Start interview"}
-          </Button>
-          {!canStart && !starting && (
-            <span className={styles.muted}>
-              {check.state === "live"
-                ? "Say a few words to finish the microphone check."
-                : "Check your microphone to continue."}
-            </span>
-          )}
-        </div>
-        <p className={styles.privacy}>Answers are transcribed for your report. Recordings are never kept.</p>
-      </div>
+      <p className={styles.privacy}>Answers are transcribed for your report. Recordings are never kept.</p>
     </div>
   );
 }
+
+function ModeOption({
+  name,
+  value,
+  checked,
+  onChange,
+  disabled = false,
+  icon,
+  title,
+  hint,
+}: {
+  name: string;
+  value: AnswerMode;
+  checked: boolean;
+  onChange: (mode: AnswerMode) => void;
+  disabled?: boolean;
+  icon: IconName;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <label className={`${styles.mode} ${checked ? styles.modeOn : ""} ${disabled ? styles.modeOff : ""}`}>
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        disabled={disabled}
+        onChange={() => onChange(value)}
+        className={styles.modeInput}
+      />
+      <span className={styles.modeIcon} aria-hidden="true">
+        <Icon name={icon} size={18} />
+      </span>
+      <span className={styles.modeText}>
+        <span className={styles.modeTitle}>{title}</span>
+        <span className={styles.modeHint}>{hint}</span>
+      </span>
+    </label>
+  );
+}
+
 
 const MIC_ERRORS: Record<MicErrorKind, { status: string; title: string; body: string }> = {
   denied: {

@@ -18,6 +18,12 @@ export interface Repository {
   updated_at: string;
 }
 
+export interface RepositoryArea {
+  /** A folder ending in "/", or a file in a flat repository. */
+  path: string;
+  chunk_count: number;
+}
+
 type InterviewStatus = "created" | "active" | "completed" | "interrupted";
 
 export interface Interview {

@@ -3,43 +3,36 @@ import { Card } from "../../components/Card";
 import { Icon } from "../../components/Icon";
 import { ScoreBar } from "../../components/ScoreBar";
 import { sourceUrl } from "./api";
+import { scoreTone } from "./scoreTone";
 import styles from "./SummaryPanel.module.css";
 
-/** The overall score first, then its parts and the takeaways in short lists. */
+/** The overall score and a one-line takeaway first, then its parts and notes. */
 export function SummaryPanel({ summary }: { summary: ReportSummary }) {
   const overall = overallScore(summary);
-  const hasNotes = summary.strengths.length > 0 || summary.improvements.length > 0;
 
   return (
-    <Card className={styles.summary}>
-      <div className={styles.scores}>
-        <div className={styles.overall}>
-          <p className={styles.label}>Overall</p>
-          <p className={styles.big}>
-            {overall === null ? "–" : overall.toFixed(1)}
-            <span className={styles.outOf}> / 5</span>
-          </p>
+    <div className={styles.summary}>
+      <Card className={styles.hero}>
+        <ScoreRing score={overall} />
+        <div className={styles.heroMain}>
+          <p className={styles.takeaway}>{takeaway(summary, overall)}</p>
           <p className={styles.hint}>
             {summary.turns_answered} of {summary.turns_asked} questions answered
           </p>
+          <div className={styles.parts}>
+            <ScoreRow label="Correctness" score={summary.average_correctness} />
+            <ScoreRow label="Clarity" score={summary.average_clarity} />
+          </div>
         </div>
-        <div className={styles.parts}>
-          <ScoreRow label="Correctness" score={summary.average_correctness} />
-          <ScoreRow label="Clarity" score={summary.average_clarity} />
-        </div>
-      </div>
+      </Card>
 
-      {summary.turns_graded === 0 && (
-        <p className={styles.none}>No answers were graded, so there are no scores yet.</p>
-      )}
-
-      {hasNotes && (
+      {(summary.strengths.length > 0 || summary.improvements.length > 0) && (
         <div className={styles.notes}>
-          <NoteList title="What went well" tone={styles.well} items={summary.strengths} />
-          <NoteList title="Work on next" tone={styles.next} items={summary.improvements} />
+          <NoteCard title="What went well" icon="check" tone={styles.well} items={summary.strengths} />
+          <NoteCard title="Work on next" icon="arrow" tone={styles.next} items={summary.improvements} />
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -47,6 +40,44 @@ export function SummaryPanel({ summary }: { summary: ReportSummary }) {
 function overallScore(summary: ReportSummary): number | null {
   const parts = [summary.average_correctness, summary.average_clarity].filter((s): s is number => s !== null);
   return parts.length === 0 ? null : parts.reduce((a, b) => a + b, 0) / parts.length;
+}
+
+function takeaway(summary: ReportSummary, overall: number | null): string {
+  if (overall === null) return "No answers were graded, so there's no score yet.";
+  const c = summary.average_correctness;
+  const k = summary.average_clarity;
+  if (c !== null && k !== null && Math.abs(c - k) >= 0.75) {
+    return c > k ? "Strong on correctness. Work on explaining it clearly." : "Clear explanations. Work on the details.";
+  }
+  if (overall >= 4) return "Strong interview. You know this code well.";
+  if (overall >= 3) return "Solid foundation, with a few gaps to close.";
+  return "Worth revisiting this code before your next round.";
+}
+
+const RADIUS = 42;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+function ScoreRing({ score }: { score: number | null }) {
+  const filled = score === null ? 0 : (score / 5) * CIRCUMFERENCE;
+  return (
+    <div className={`${styles.ring} ${styles[scoreTone(score)]}`}>
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="50" r={RADIUS} className={styles.ringTrack} />
+        <circle
+          cx="50"
+          cy="50"
+          r={RADIUS}
+          className={styles.ringFill}
+          strokeDasharray={`${filled} ${CIRCUMFERENCE}`}
+          transform="rotate(-90 50 50)"
+        />
+      </svg>
+      <p className={styles.ringValue} aria-label={score === null ? "Overall: not scored" : `Overall ${score.toFixed(1)} out of 5`}>
+        <span className={styles.big}>{score === null ? "–" : score.toFixed(1)}</span>
+        <span className={styles.outOf}>of 5</span>
+      </p>
+    </div>
+  );
 }
 
 function ScoreRow({ label, score }: { label: string; score: number | null }) {
@@ -61,11 +92,16 @@ function ScoreRow({ label, score }: { label: string; score: number | null }) {
   );
 }
 
-function NoteList({ title, tone, items }: { title: string; tone: string; items: string[] }) {
+function NoteCard({ title, icon, tone, items }: { title: string; icon: "check" | "arrow"; tone: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
-    <section className={styles.note}>
-      <h3 className={`${styles.noteTitle} ${tone}`}>{title}</h3>
+    <section className={`${styles.note} ${tone}`}>
+      <h3 className={styles.noteTitle}>
+        <span className={styles.noteIcon} aria-hidden="true">
+          <Icon name={icon} size={14} />
+        </span>
+        {title}
+      </h3>
       <ul className={styles.items}>
         {items.map((item) => (
           <li key={item}>{item}</li>
@@ -81,12 +117,13 @@ export function FilesToRevisit({ files, githubUrl }: { files: ReportSummary["fil
       {files.map((f) => (
         <li key={f.file} className={styles.file}>
           <Icon name="file" size={16} className={styles.fileIcon} />
-          <div className={styles.fileMain}>
+          <span className={styles.fileMain}>
             <a href={sourceUrl(githubUrl, { filename: f.file })} target="_blank" rel="noreferrer" className={styles.fileName}>
               {f.file}
             </a>
-            <p className={styles.reason}>{f.reason}</p>
-          </div>
+            <span className={styles.reason}>{f.reason}</span>
+          </span>
+          <Icon name="external" size={14} className={styles.fileGo} />
         </li>
       ))}
     </ul>

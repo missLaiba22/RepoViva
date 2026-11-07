@@ -30,9 +30,22 @@ describe("reports page", () => {
     const rows = within(list).getAllByRole("listitem");
     expect(within(rows[0]).getByText("Completed")).toBeInTheDocument();
     expect(within(rows[0]).getByText(/14 min/)).toBeInTheDocument();
-    expect(within(rows[0]).getByRole("link", { name: /view report/i })).toHaveAttribute("href", "/interviews/10/report");
+    expect(within(rows[0]).getByRole("link", { name: /report/i })).toHaveAttribute("href", "/interviews/10/report");
     expect(within(rows[1]).getByText("Ended early")).toBeInTheDocument();
-    expect(within(rows[2]).queryByRole("link", { name: /view report/i })).toBeNull();
+    expect(within(rows[2]).queryByRole("link")).toBeNull();
+  });
+
+  it("narrows to one repository from ?repository=", async () => {
+    signedIn(
+      [repository(), repository({ id: 16, github_url: "https://github.com/a/other" })],
+      [interview(), interview({ id: 11, repository_id: 16 })],
+    );
+    renderApp("/interviews?repository=16");
+
+    const list = await screen.findByRole("list", { name: "Reports" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).getByRole("link")).toHaveAttribute("href", "/interviews/11/report");
+    expect(screen.getByRole("link", { name: "other" })).toHaveAttribute("aria-current", "page");
   });
 
   it("hides interviews that never started", async () => {

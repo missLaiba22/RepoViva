@@ -1,0 +1,104 @@
+.card {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+}
+
+.title {
+  font-size: var(--text-xl);
+}
+
+.lead {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  position: relative;
+  display: flex;
+  gap: var(--space-4);
+  padding-bottom: var(--space-5);
+}
+
+.step:last-child {
+  padding-bottom: 0;
+}
+
+/* The line joining one marker to the next. */
+.step:not(:last-child)::before {
+  position: absolute;
+  top: 2rem;
+  bottom: 0.25rem;
+  left: calc(0.875rem - 1px);
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.done:not(:last-child)::before {
+  background: var(--primary);
+}
+
+.marker {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.done .marker {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.current .marker {
+  border-color: var(--primary);
+  color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.body {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-top: 0.2rem;
+}
+
+.stepTitle {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.done .stepTitle,
+.todo .stepTitle {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.text {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.action {
+  margin-top: var(--space-1);
+}

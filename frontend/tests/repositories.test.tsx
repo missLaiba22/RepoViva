@@ -86,11 +86,20 @@ describe("repository page", () => {
     expect(await screen.findByRole("heading", { name: /preparing your repository/i })).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
 
-    api.fetchMock.mockImplementation(async () => new Response(JSON.stringify(repository()), { status: 200 }));
+    api.fetchMock.mockImplementation(async (input) => {
+      const body = String(input).endsWith("/areas")
+        ? { areas: [{ path: "src/api/", chunk_count: 40 }] }
+        : repository();
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
     await act(() => vi.advanceTimersByTimeAsync(2100));
 
-    expect(await screen.findByRole("heading", { name: /ready to practice/i })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /start interview/i })).toHaveAttribute(
+      "href",
+      "/repositories/15/interview",
+    );
     expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(await screen.findByText("src/api/")).toBeInTheDocument();
   });
 
   it("explains a failed repository in plain words, with the raw error behind Details", async () => {

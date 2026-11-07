@@ -1,28 +1,53 @@
 .page {
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
 }
+
+.wrap {
+  width: 100%;
+  max-width: 68rem;
+  margin: 0 auto;
+  padding-inline: var(--space-4);
+}
+
+/* Top bar */
 
 .top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-4);
   width: 100%;
   max-width: 68rem;
   margin: 0 auto;
   padding: var(--space-5) var(--space-4);
 }
 
-.main {
+.nav {
+  display: flex;
+  gap: var(--space-5);
+  margin-left: auto;
+  font-size: var(--text-sm);
+}
+
+.nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.nav a:hover {
+  color: var(--text);
+}
+
+/* Hero */
+
+.hero {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   align-items: center;
   gap: var(--space-7);
-  width: 100%;
-  max-width: 68rem;
-  margin: 0 auto;
-  padding: var(--space-7) var(--space-4) var(--space-8);
+  padding-block: var(--space-7) var(--space-8);
 }
 
 .title {
@@ -31,48 +56,321 @@
 }
 
 .lead {
-  max-width: 30rem;
+  max-width: 32rem;
   margin-top: var(--space-4);
   color: var(--text-muted);
   font-size: var(--text-lg);
+  line-height: 1.55;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3) var(--space-4);
+  gap: var(--space-3) var(--space-5);
   margin-top: var(--space-6);
 }
 
-.note {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--primary);
+  font-weight: 500;
+  text-decoration: none;
 }
 
-.steps {
+.secondary:hover {
+  text-decoration: underline;
+}
+
+.badges {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-5);
-  margin: var(--space-7) 0 0;
-  padding: var(--space-4) 0 0;
-  border-top: 1px solid var(--border);
+  gap: var(--space-2);
+  margin: var(--space-5) 0 0;
+  padding: 0;
   list-style: none;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
 }
 
-.steps li {
+.badges li {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
 }
 
-.steps svg {
+/* The first badge answers "which repositories?", so it stands out. */
+.badges li:first-child {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.badges svg {
   color: var(--primary);
 }
 
+/* Sections */
+
+.band {
+  border-block: 1px solid var(--border);
+  background: var(--surface-sunken);
+}
+
+.band,
+#report {
+  padding-block: var(--space-8);
+  scroll-margin-top: var(--space-4);
+}
+
+.sectionHead {
+  max-width: 36rem;
+  margin-bottom: var(--space-6);
+}
+
+.band .sectionHead {
+  margin-inline: auto;
+  text-align: center;
+}
+
+.kicker {
+  margin-bottom: var(--space-2);
+  color: var(--primary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sectionTitle {
+  font-size: var(--text-2xl);
+  line-height: 1.25;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: var(--space-7);
+}
+
+/* How it works */
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  text-align: center;
+}
+
+/* The line from one step's icon to the next. */
+.step:not(:last-child)::after {
+  position: absolute;
+  top: 1.75rem;
+  left: calc(50% + 2.25rem);
+  right: calc(-50% + 2.25rem - var(--space-4));
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border-strong);
+  content: "";
+}
+
+.stepIcon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--primary);
+}
+
+.stepTitle {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+/* What you get */
+
+.checks {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checks li {
+  position: relative;
+  padding-left: var(--space-6);
+}
+
+.checks li::before {
+  position: absolute;
+  top: 0.3rem;
+  left: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: var(--primary)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E")
+    center / 70% no-repeat;
+  content: "";
+}
+
+.report {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.reportHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.reportLabel {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.scores {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.score {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: 0.125rem var(--space-2);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.score strong {
+  color: var(--text);
+}
+
+.reportQuestion {
+  font-family: var(--font-serif);
+  font-size: var(--text-lg);
+  line-height: 1.35;
+}
+
+.points {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-3);
+}
+
+.points > div {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.pointsTitle {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.good {
+  color: var(--secondary-text);
+}
+
+.gap {
+  color: var(--warning);
+}
+
+.cite {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.25rem;
+  padding: 0.125rem var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* Closing call to action */
+
+.final {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-5);
+  padding: var(--space-8) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface-sunken);
+  text-align: center;
+}
+
+.finalTitle {
+  font-size: var(--text-2xl);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-block: var(--space-5);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
 /* The interview preview: a static still of the live screen. */
+
 .preview {
   margin: 0;
   overflow: hidden;
@@ -129,13 +427,18 @@
   font-size: var(--text-xs);
 }
 
+.previewArea {
+  color: var(--text-muted);
+}
+
 .previewQuestion {
   font-family: var(--font-serif);
   font-size: var(--text-xl);
   line-height: 1.35;
 }
 
-.previewQuestion code {
+.previewQuestion code,
+.report code {
   font-size: 0.85em;
 }
 
@@ -178,9 +481,32 @@
 }
 
 @media (max-width: 820px) {
-  .main {
+  .hero,
+  .split {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-6);
+  }
+
+  .hero {
     padding-top: var(--space-5);
+  }
+
+  .nav {
+    display: none;
+  }
+
+  .steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: var(--space-6);
+  }
+
+  .step::after {
+    display: none;
+  }
+
+  .band,
+  #report,
+  .final {
+    padding-block: var(--space-7);
   }
 }

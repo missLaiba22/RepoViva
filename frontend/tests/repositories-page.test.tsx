@@ -20,7 +20,7 @@ describe("repositories page", () => {
     expect(within(screen.getByRole("main")).getAllByRole("link", { name: /connect repository/i })).toHaveLength(1);
   });
 
-  it("lists repositories with status, and offers an interview only when ready", async () => {
+  it("lists repositories with status, each opening its own page", async () => {
     signedIn([
       repository(),
       repository({ id: 16, github_url: "https://github.com/missLaiba22/repoviva", status: "in_progress" }),
@@ -32,12 +32,10 @@ describe("repositories page", () => {
     const rows = within(list).getAllByRole("listitem");
     expect(rows).toHaveLength(3);
     expect(within(rows[0]).getByText("Ready to practice")).toBeInTheDocument();
-    expect(within(rows[0]).getByRole("link", { name: /start interview/i })).toHaveAttribute(
-      "href",
-      "/repositories/15/interview",
-    );
+    expect(within(rows[0]).getByRole("link")).toHaveAttribute("href", "/repositories/15");
+    expect(within(rows[0]).getByText("Not practiced yet")).toBeInTheDocument();
+    expect(within(rows[0]).queryByRole("link", { name: /start interview/i })).toBeNull();
     expect(within(rows[1]).getByText("Preparing")).toBeInTheDocument();
-    expect(within(rows[1]).queryByRole("link", { name: /start interview/i })).toBeNull();
     expect(within(rows[2]).getByText("Import failed")).toBeInTheDocument();
     expect(within(rows[2]).getByText("Couldn't prepare this repository.")).toBeInTheDocument();
     expect(within(rows[2]).getByRole("button", { name: "Retry" })).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import type { TurnEvaluation } from "../../api/types";
 import { ScoreBar } from "../../components/ScoreBar";
 import { SourceList } from "./SourceChip";
+import { scoreTone } from "./scoreTone";
 import styles from "./TurnList.module.css";
 
 /** One expandable row per question, in interview order. */
@@ -39,12 +40,8 @@ function Turn({ turn, githubUrl }: { turn: TurnEvaluation; githubUrl: string }) 
           <p className={styles.question}>{turn.question}</p>
           {turn.status === "graded" ? (
             <p className={styles.pills}>
-              <span className={styles.pill}>
-                Correctness <strong>{turn.correctness.score}</strong>
-              </span>
-              <span className={styles.pill}>
-                Clarity <strong>{turn.clarity.score}</strong>
-              </span>
+              <Pill label="Correctness" score={turn.correctness.score} />
+              <Pill label="Clarity" score={turn.clarity.score} />
             </p>
           ) : (
             <p className={styles.meta}>Couldn&rsquo;t be graded</p>
@@ -101,6 +98,14 @@ function Turn({ turn, githubUrl }: { turn: TurnEvaluation; githubUrl: string }) 
         )}
       </div>
     </details>
+  );
+}
+
+function Pill({ label, score }: { label: string; score: number }) {
+  return (
+    <span className={`${styles.pill} ${styles[scoreTone(score)]}`}>
+      {label} <strong>{score}</strong>
+    </span>
   );
 }
 

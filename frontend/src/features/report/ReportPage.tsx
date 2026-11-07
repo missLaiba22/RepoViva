@@ -6,6 +6,7 @@ import { Button, ButtonLink } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { ConnectionProblem } from "../../components/ConnectionProblem";
 import { EmptyState } from "../../components/EmptyState";
+import { Icon } from "../../components/Icon";
 import { PageHeader } from "../../components/PageHeader";
 import { ProgressBar } from "../../components/ProgressBar";
 import { PageSpinner } from "../../components/Spinner";
@@ -29,7 +30,7 @@ export function ReportPage() {
   if (context.state === "error") {
     if (context.error instanceof ApiError && (context.error.status === 404 || context.error.status === 422)) {
       return (
-        <EmptyState title="Report not found" action={<ButtonLink to="/interviews">All reports</ButtonLink>}>
+        <EmptyState icon="report" title="Report not found" action={<ButtonLink to="/interviews">All reports</ButtonLink>}>
           This interview doesn&rsquo;t exist, or it belongs to another account.
         </EmptyState>
       );
@@ -43,7 +44,7 @@ export function ReportPage() {
       {hasEnded(context.data.interview) ? (
         <ReportBody context={context.data} />
       ) : (
-        <EmptyState title="This interview hasn't finished" action={<ButtonLink to="/interviews">All reports</ButtonLink>}>
+        <EmptyState icon="clock" title="This interview hasn't finished" action={<ButtonLink to="/interviews">All reports</ButtonLink>}>
           The report is written once the interview ends.
         </EmptyState>
       )}
@@ -69,13 +70,6 @@ function Header({ context }: { context: ReportContext }) {
           {minutes !== null && ` · ${minutes} min`}
           {interview.status === "interrupted" && <span className={styles.badge}>Ended early</span>}
         </p>
-      }
-      actions={
-        repository.status === "ready" && (
-          <ButtonLink to={`/repositories/${repository.id}/interview`} variant="secondary">
-            Practise again
-          </ButtonLink>
-        )
       }
     />
   );
@@ -130,12 +124,23 @@ function ReportBody({ context }: { context: ReportContext }) {
       )}
 
       <footer className={styles.footer}>
-        <div className={styles.actions}>
-          <ButtonLink to={`/repositories/${repository.id}/interview`}>Practise again</ButtonLink>
-          <ButtonLink to="/interviews" variant="ghost">
-            All reports
-          </ButtonLink>
-        </div>
+        <Card className={styles.next}>
+          <div>
+            <h2 className={styles.nextTitle}>Ready for another round?</h2>
+            <p className={styles.fine}>New questions come from the same code. Use the gaps above as your study list.</p>
+          </div>
+          <div className={styles.actions}>
+            {repository.status === "ready" && (
+              <ButtonLink to={`/repositories/${repository.id}/interview`}>
+                Practise again
+                <Icon name="arrow" size={16} />
+              </ButtonLink>
+            )}
+            <ButtonLink to="/interviews" variant="ghost">
+              All reports
+            </ButtonLink>
+          </div>
+        </Card>
         <p className={styles.fine}>Feedback is AI-written from your code. Treat it as a study guide, not a verdict.</p>
       </footer>
     </>

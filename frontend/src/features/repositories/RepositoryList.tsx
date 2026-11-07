@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Interview, Repository } from "../../api/types";
-import { Button, ButtonLink } from "../../components/Button";
+import { Button } from "../../components/Button";
 import { ErrorDetails } from "../../components/ErrorDetails";
 import { Icon } from "../../components/Icon";
 import { ProgressBar } from "../../components/ProgressBar";
-import { formatDate, repoName } from "../../lib/format";
+import { formatDate, formatRelative, repoName } from "../../lib/format";
 import { isIndexing, retryRepository } from "./api";
 import { PROBLEM_TITLE, repositoryProblem } from "./problem";
 import { StatusChip } from "./StatusChip";
@@ -27,7 +27,7 @@ export function RepositoryList({
         <li key={repo.id} className={styles.card}>
           <RepositoryCard
             repository={repo}
-            interviewCount={interviews.filter((i) => i.repository_id === repo.id).length}
+            interviews={interviews.filter((i) => i.repository_id === repo.id)}
             onChanged={onChanged}
           />
         </li>
@@ -36,18 +36,21 @@ export function RepositoryList({
   );
 }
 
+/** The whole card opens the repository's page, where the interview starts:
+ * one way in, not a second Start button here. */
 function RepositoryCard({
   repository,
-  interviewCount,
+  interviews,
   onChanged,
 }: {
   repository: Repository;
-  interviewCount: number;
+  interviews: Interview[];
   onChanged?: () => void;
 }) {
   const { owner, name } = repoName(repository.github_url);
+  const count = interviews.length;
   const meta = [
-    interviewCount > 0 && `${interviewCount} ${interviewCount === 1 ? "interview" : "interviews"}`,
+    count > 0 && `${count} ${count === 1 ? "interview" : "interviews"}`,
     `Added ${formatDate(repository.created_at)}`,
   ].filter(Boolean);
 
@@ -65,10 +68,13 @@ function RepositoryCard({
 
       <div className={styles.foot}>
         {repository.status === "ready" ? (
-          <ButtonLink to={`/repositories/${repository.id}/interview`}>
-            Start interview
-            <Icon name="arrow" size={16} />
-          </ButtonLink>
+          <p className={styles.next}>
+            <span>{lastPracticed(interviews)}</span>
+            <span className={styles.open} aria-hidden="true">
+              Open
+              <Icon name="arrow" size={16} />
+            </span>
+          </p>
         ) : isIndexing(repository.status) ? (
           <div className={styles.preparing}>
             <ProgressBar label="Preparing" />
@@ -80,6 +86,15 @@ function RepositoryCard({
       </div>
     </>
   );
+}
+
+function lastPracticed(interviews: Interview[]): string {
+  const latest = interviews
+    .map((i) => i.started_at)
+    .filter((d): d is string => d !== null)
+    .sort()
+    .at(-1);
+  return latest ? `Last practiced ${formatRelative(latest)}` : "Not practiced yet";
 }
 
 function FailedFoot({ repository, onChanged }: { repository: Repository; onChanged?: () => void }) {

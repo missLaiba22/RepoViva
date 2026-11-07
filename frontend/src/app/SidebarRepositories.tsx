@@ -38,6 +38,7 @@ export function SidebarRepositories({ linkClass }: { linkClass: (active: boolean
         Repositories
         {preparing > 0 && (
           <span className={styles.badge} title={`${preparing} preparing`}>
+            <span className={styles.badgeDot} aria-hidden="true" />
             {preparing}
             <span className="visually-hidden"> preparing</span>
           </span>

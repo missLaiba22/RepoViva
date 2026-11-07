@@ -1,6 +1,6 @@
 import { ApiError, api } from "../../api/client";
 import { listInterviews } from "../../api/interviews";
-import type { Interview, Repository, RepositoryStatus } from "../../api/types";
+import type { Interview, Repository, RepositoryArea, RepositoryStatus } from "../../api/types";
 
 const listeners = new Set<() => void>();
 
@@ -23,6 +23,11 @@ export function listRepositories(): Promise<Repository[]> {
 
 export function getRepository(id: number): Promise<Repository> {
   return api.get<Repository>(`/v1/repositories/${id}`);
+}
+
+/** The code areas questions come from, largest first (decision 065). */
+export function getRepositoryAreas(id: number): Promise<RepositoryArea[]> {
+  return api.get<{ areas: RepositoryArea[] }>(`/v1/repositories/${id}/areas`).then((body) => body.areas);
 }
 
 /** Repositories with the user's interviews, for each card's interview count.

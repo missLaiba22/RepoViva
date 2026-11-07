@@ -8,6 +8,7 @@
 }
 
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -41,7 +42,44 @@
   overflow-wrap: anywhere;
 }
 
-.name:hover {
+/* Stretches the name's link over the whole card. */
+.name::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  content: "";
+}
+
+.name:focus-visible {
+  outline: none;
+}
+
+.name:focus-visible::after {
+  box-shadow: var(--focus-ring);
+}
+
+.card:hover .name {
+  color: var(--primary);
+}
+
+.next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 500;
+  transition: color 120ms ease;
+}
+
+.card:hover .open {
   color: var(--primary);
 }
 
@@ -97,7 +135,10 @@
   flex-shrink: 0;
 }
 
+/* Above the card's stretched link, so Retry and Details stay clickable. */
 .actions {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

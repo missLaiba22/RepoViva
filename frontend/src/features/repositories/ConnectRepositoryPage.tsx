@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { Button, ButtonLink } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { Icon, type IconName } from "../../components/Icon";
 import { PageHeader } from "../../components/PageHeader";
 import { REPOSITORIES_CRUMB } from "../../lib/crumbs";
 import { connectRepository } from "./api";
@@ -99,9 +100,30 @@ export function ConnectRepositoryPage() {
         </form>
       </Card>
 
+      <section className={styles.tips} aria-labelledby="tips-heading">
+        <h2 id="tips-heading" className={styles.tipsTitle}>
+          What works best
+        </h2>
+        <ul className={styles.tipList}>
+          {TIPS.map((tip) => (
+            <li key={tip.title}>
+              <Icon name={tip.icon} size={16} />
+              <span>
+                <strong>{tip.title}.</strong> {tip.body}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }
+
+const TIPS: { icon: IconName; title: string; body: string }[] = [
+  { icon: "repo", title: "Code you wrote or know well", body: "Questions ask why it was built this way, not just what it does." },
+  { icon: "file", title: "Python, JavaScript/TypeScript, Go, Rust, Java or Ruby", body: "READMEs and docs are read too." },
+  { icon: "alert", title: "Not too large", body: "Very big projects, like popular frameworks, can't be prepared yet." },
+];
 
 function messageFor(error: unknown): string {
   if (error instanceof ApiError) {

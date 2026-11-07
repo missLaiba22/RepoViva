@@ -9,6 +9,8 @@ export function ConnectionProblem({ error, onRetry }: { error: unknown; onRetry:
   return (
     <div className={styles.wrap}>
       <EmptyState
+        icon="alert"
+        tone="warning"
         title={offline ? "We can't connect right now" : "Something went wrong on our side"}
         action={<Button onClick={onRetry}>Try again</Button>}
       >
