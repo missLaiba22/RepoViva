@@ -3178,3 +3178,35 @@ works; production needs the same. The microphone only works on HTTPS.
 **Revisit when:**
 The credit or free plan ends, a service needs to scale on its own, or
 uptime matters more than cost.
+
+---
+
+## 064 — The live page shows which part of the code a question is about
+
+*Status: decided and implemented 2026-11-08. Amends the WebSocket
+protocol (decision 053).*
+
+**Context:**
+Each planned question belongs to one area of the repository and has a
+short topic (decisions 052, 060), but the page only received the
+question text, so the candidate couldn't see which module was being
+discussed.
+
+**Decision:**
+`question.text` gains `area` (the area's path, e.g. `src/auth/`) and
+`topic`, both already stored on the planned question. The page shows
+them above the question.
+
+**Options considered:**
+- **Fetch the plan from Core API.** The plan endpoint deliberately never
+  returns questions; returning them would reveal the questions early.
+- **The files behind the question's `chunk_ids`.** More precise, but
+  needs a Repository Service lookup per question; the area path is
+  enough to orient the candidate.
+
+**Tradeoff:**
+- The WebSocket contract changes. Both fields are optional on the page,
+  so without them it shows the question alone.
+
+**Revisit when:**
+Questions span several areas, or the page should point at exact files.

@@ -188,7 +188,9 @@ async def test_messages_carry_seq():
 
     await session.run(ws)
 
-    assert ws.sent[1] == {"type": "question.text", "seq": 1, "text": "Q1?"}
+    assert ws.sent[1] == {
+        "type": "question.text", "seq": 1, "text": "Q1?", "area": "area1/", "topic": "topic 1",
+    }
     assert ws.sent[2] == {"type": "question.audio_end", "seq": 1}
     assert ws.sent[3] == {"type": "turn.complete", "seq": 1}
 

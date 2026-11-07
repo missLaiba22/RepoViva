@@ -61,8 +61,9 @@ def session_ready(interview_id: int, question_count: int) -> dict[str, Any]:
     return {"type": "session.ready", "interview_id": interview_id, "question_count": question_count}
 
 
-def question_text(seq: int, text: str) -> dict[str, Any]:
-    return {"type": "question.text", "seq": seq, "text": text}
+def question_text(seq: int, text: str, area: str, topic: str) -> dict[str, Any]:
+    # area and topic: which part of the code the question is about (decision 064).
+    return {"type": "question.text", "seq": seq, "text": text, "area": area, "topic": topic}
 
 
 def question_audio_end(seq: int) -> dict[str, Any]:

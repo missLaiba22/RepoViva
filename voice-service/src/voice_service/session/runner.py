@@ -252,7 +252,7 @@ class InterviewSession:
             await self._sessions.mark_asked(interview_id, seq)
 
             # 2. Ask: the text first (captions), then the spoken question.
-            await ws.send_json(protocol.question_text(seq, question.text))
+            await ws.send_json(protocol.question_text(seq, question.text, question.area, question.topic))
             tts_timings = await self._speak(ws, seq, question.text)
             await self._sessions.add_timings(interview_id, seq, tts_timings)
             logger.info(

@@ -353,7 +353,7 @@ Client → Server
 
 Server → Client
   session.ready       { interview_id, question_count }   the plan's length (decision 062)
-  question.text       { seq, text }   sent before the audio, as captions
+  question.text       { seq, text, area, topic }   sent before the audio, as captions; area and topic name the code it asks about (decision 064)
   <binary>                             question audio: PCM16 LE, 24 kHz, mono
   question.audio_end  { seq }          all audio sent; the client may open the mic
   transcript.final    { seq, text }    what STT heard
